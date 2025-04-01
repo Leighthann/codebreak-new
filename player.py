@@ -7,6 +7,7 @@ from enemy import Enemy
 
 # player.py
 import pygame
+from enemy import Enemy
 
 class Player:
     def __init__(self, sprite_sheet, x, y, speed=5):
@@ -15,12 +16,20 @@ class Player:
         self.direction = "idle"
         self.frame_index = 0
         self.sprite_width, self.sprite_height = 48, 48
+        self.width = self.sprite_width  # Add width attribute
+        self.height = self.sprite_height  # Add height attribute
         self.load_animations(sprite_sheet)
         self.attacking = False
         self.attack_start_time = 0
         self.projectiles = []
         self.attack_duration = 300  # Duration of attack in milliseconds
         self.projectile_speed = 7
+        self.health = 100
+        self.max_health = 100
+        self.enemies = []  # Initialize enemies as an empty list or populate it as needed
+        self.effects = GameEffects()  # Initialize GameEffects instance
+        self.last_projectile_time = 0  # Track the last time a projectile was fired
+        self.projectile_cooldown = 500  # Cooldown in milliseconds (e.g., 500ms)
 
     def load_animations(self, sheet):
         """Extracts frames for different animations."""
@@ -46,18 +55,24 @@ class Player:
     
     def animate(self, moving, keys, enemies):
         """Updates sprite based on movement or actions."""
+        current_time = pygame.time.get_ticks()
+
         if keys[pygame.K_SPACE] and not self.attacking:  # Melee attack
             self.attacking = True
-            self.attack_start_time = pygame.time.get_ticks()
+            self.attack_start_time = current_time
+            self.effects.play_attack_sound()  # Play attack sound
 
-        if keys[pygame.K_f]:  # Ranged attack (shoot projectile)
+        if keys[pygame.K_f] and current_time - self.last_projectile_time >= self.projectile_cooldown:
+            # Ranged attack (shoot projectile)
             self.projectiles.append({
                 "x": self.x + self.sprite_width // 2,
                 "y": self.y + self.sprite_height // 2,
                 "dir": self.direction,
-                "width": 5,  # Add width for the projectile
-                "height": 5  # Add height for the projectile
+                "width": 5,
+                "height": 5
             })
+            self.effects.play_hit_sound()  # Play projectile sound
+            self.last_projectile_time = current_time  # Update the last projectile time
 
         # Update attack animation
         if self.attacking:
@@ -99,7 +114,7 @@ class Player:
             pygame.draw.circle(pygame.display.get_surface(), (255, 255, 255), (projectile["x"], projectile["y"]), 5)
 
             # Check collision with enemies
-            for enemy in enemies:  # Assuming enemies is a list of Enemy objects
+            for enemy in self.enemies:  # Assuming enemies is a list of Enemy objects
                 if enemy.collides_with(projectile):
                     enemies.remove(enemy)  # Remove enemy on collision
                     self.projectiles.remove(projectile)  # Remove projectile on collision
