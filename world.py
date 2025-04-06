@@ -20,8 +20,9 @@ TERRAIN_COLORS = {
 
 class WorldGenerator:
     def __init__(self):
-        self.world_map = self.generate_world()  # Generate the world map
-        self.tile_size = TILE_SIZE  # Dynamically set tile size
+        self.world_map = self.generate_world()
+        self.world_map = []  # Example placeholder for the world map
+        self.tile_size = 32  # Define tile_size with an appropriate value
 
     def generate_world(self):
         """Generate the world map using noise for biome generation."""
@@ -53,6 +54,6 @@ class WorldGenerator:
         """Draw the generated world on the screen."""
         for y, row in enumerate(self.world_map):
             for x, biome in enumerate(row):
-                color = BIOME_COLORS.get(biome, (0, 0, 0))  # Default to black if biome is unknown
-                pygame.draw.rect(screen, color, pygame.Rect(x * self.tile_size, y * self.tile_size, self.tile_size, self.tile_size))
+                color = BIOME_COLORS[biome]  # Select biome color
+                pygame.draw.rect(screen, color, pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE))
 

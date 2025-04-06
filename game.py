@@ -1,21 +1,17 @@
 # game.py
 import pygame
 import sys
-import random
 from player import Player
 from enemy import Enemy
 from effects import GameEffects
 from world import WorldGenerator
 from worldObject import WorldObjects
-from resource_crafting_inventory import Resource
 
 pygame.init()
 
 # Game window settings
-WIDTH, HEIGHT = pygame.display.Info().current_w, pygame.display.Info().current_h  # Get screen resolution
-ASPECT_RATIO = WIDTH / HEIGHT  # Calculate aspect ratio
+WIDTH, HEIGHT = 800, 600
 BG_COLOR = (30, 30, 30)
-TILE_SIZE = min(WIDTH // 25, HEIGHT // 20)  # Dynamically adjust tile size based on screen resolution
 
 # Fonts for buttons
 font = pygame.font.Font(None, 50)
@@ -89,37 +85,28 @@ class Menu:
 class Game:
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)  # Set full-screen mode
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("CodeBreak - Survival")
         self.clock = pygame.time.Clock()
         self.FPS = 60
 
         # Create the world generator and objects
         self.world_generator = WorldGenerator()
-        self.world_generator.tile_size = TILE_SIZE  # Update tile size for world generation
         self.world_objects = WorldObjects()
         self.world_objects.generate_objects(self.world_generator.world_map)
 
         # Load player sprite sheet
         sprite_sheet = pygame.image.load("spritesheets/player-spritesheet.png")
-        self.player = Player(sprite_sheet, WIDTH // 2, HEIGHT // 2, TILE_SIZE)  # Ensure Player is initialized
+        self.player = Player(sprite_sheet, WIDTH // 2, HEIGHT // 2)
 
         # Load enemy sprite
         enemy_sprite = pygame.image.load("spritesheets/enemy-spritesheet.png")
-        self.enemies = [Enemy(enemy_sprite, TILE_SIZE * 5, TILE_SIZE * 5)]  # Position enemy relative to tile size
+        self.enemies = [Enemy(enemy_sprite, 200, 200)]
 
         self.effects = GameEffects()
 
         self.menu = Menu(self)  # Pass the Game instance to the Menu
         self.game_state = "menu"  # Start with the menu state
-
-        self.resources = self.spawn_resources(10)  # Spawn 10 resources in the game world
-        self.player.resources = self.resources  # Assign resources using the compatible BaseResource type
-
-    def spawn_resources(self, num_resources):
-        """Spawn resources randomly in the game world."""
-        resource_types = ["code_fragments", "energy_cores", "data_shards"]
-        return [Resource(random.randint(50, WIDTH - 50), random.randint(50, HEIGHT - 50), random.choice(resource_types)) for _ in range(num_resources)]
 
     def run(self):
         """Main game loop."""
@@ -165,27 +152,15 @@ class Game:
 
         # Handle player movement
         keys = pygame.key.get_pressed()
-        moving = self.player.move(keys)  # Update player movement
-        player_sprite = self.player.animate(moving, keys, self.enemies)  # Update player animations
+        moving = self.player.move(keys)
+        player_sprite = self.player.animate(moving, keys, self.enemies)
 
         # Draw game elements
         self.screen.fill(BG_COLOR)
-
-        # Draw the world map
-        self.world_generator.draw_world(self.screen)
-
-        # Draw resources
-        for resource in self.resources:
-            resource.draw(self.screen)
-
-        # Draw player
-        if player_sprite:  # Ensure player_sprite is not None
-            self.screen.blit(player_sprite, (self.player.x, self.player.y))
-        else:
-            print("Warning: Player animation returned None")  # Debug: Log missing sprite
+        self.screen.blit(player_sprite, (self.player.x, self.player.y))
 
         # Draw player health bar
-        self.effects.draw_health_bar(self.screen, 10, 10, WIDTH // 4, HEIGHT // 30, self.player.health, self.player.max_health)
+        self.effects.draw_health_bar(self.screen, 10, 10, 200, 20, self.player.health, self.player.max_health)
 
         # Update and draw enemies
         for enemy in self.enemies:
@@ -193,8 +168,7 @@ class Game:
             enemy_sprite = enemy.animate()
             if enemy_sprite:  # Ensure enemy_sprite is not None
                 self.screen.blit(enemy_sprite, (enemy.x, enemy.y))
-                # Draw enemy health bar
-                self.effects.draw_health_bar(self.screen, enemy.x, enemy.y - TILE_SIZE // 4, TILE_SIZE * 2, TILE_SIZE // 4, enemy.health, enemy.max_health)
+                self.effects.draw_health_bar(self.screen, enemy.x, enemy.y - 10, 50, 5, enemy.health, enemy.max_health)
             else:
                 print(f"Warning: Enemy animation returned None for enemy at ({enemy.x}, {enemy.y})")  # Debug: Log missing sprite
 
