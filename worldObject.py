@@ -1,6 +1,37 @@
 import random
 import pygame
 
+class WorldObject:
+    def __init__(self, x, y, type):
+        self.x = x
+        self.y = y
+        self.type = type  # "console", "crate", "terminal", "debris"
+        self.width = 32
+        self.height = 32
+        self.interactable = type in ["console", "terminal"]
+    
+    def draw(self, surface, sprite=None):
+        """Draw the object on the surface."""
+        if sprite:
+            # Draw with provided sprite
+            surface.blit(sprite, (self.x, self.y))
+        else:
+            # Fallback drawing if no sprite is available
+            color = {
+                "console": (0, 255, 255),  # Cyan
+                "crate": (139, 69, 19),    # Brown
+                "terminal": (0, 255, 0),   # Green
+                "debris": (128, 128, 128)  # Gray
+            }.get(self.type, (255, 255, 255))
+            
+            pygame.draw.rect(surface, color, pygame.Rect(self.x, self.y, self.width, self.height))
+    
+    def collides_with(self, rect):
+        """Check if object collides with a rectangle."""
+        object_rect = pygame.Rect(self.x, self.y, self.width, self.height)
+        return object_rect.colliderect(rect)
+
+# Keep the original WorldObjects class for backward compatibility
 class WorldObjects:
     def __init__(self):
         self.objects = []
