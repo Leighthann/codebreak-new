@@ -29,6 +29,7 @@ class Player:
         self.attacking = False
         self.is_dashing = False
         self.is_invincible = False
+        self.is_moving = False  # Add movement state tracking
         
         # Timers
         self.attack_start_time = 0
@@ -183,7 +184,7 @@ class Player:
             self.x += self.speed
             self.direction = "right"
             moving = True
-            
+        
         # Check if new position is valid
         if moving and world_generator:
             # Create player collision rect
@@ -279,6 +280,15 @@ class Player:
 
     def fire_projectile(self):
         """Create a new projectile in the current direction."""
+        projectile_cost = 8.0  # Energy cost for firing projectile
+        
+        # Check if player has enough energy
+        if self.energy < projectile_cost:
+            return
+        
+        # Consume energy
+        self.energy = max(0, self.energy - projectile_cost)
+        
         # Calculate spawn position (center of player)
         center_x = self.x + self.width // 2
         center_y = self.y + self.height // 2
@@ -439,6 +449,24 @@ class Player:
             print("DEBUG: No tool equipped")
             return
         
+        # Define energy costs for tools
+        tool_costs = {
+            "energy_sword": 20,
+            "data_shield": 25,
+            "hack_tool": 15
+        }
+        
+        # Get energy cost for current tool
+        energy_cost = tool_costs.get(self.equipped_tool["name"], 10)
+        
+        # Check if player has enough energy
+        if self.energy < energy_cost:
+            print("DEBUG: Not enough energy to use tool")
+            return
+        
+        # Consume energy
+        self.energy = max(0, self.energy - energy_cost)
+        
         print(f"DEBUG: Using tool: {self.equipped_tool['name']}")
             
         # Apply tool effects based on type
@@ -491,4 +519,27 @@ class Player:
                 self.crafted_items.remove(self.equipped_tool)
                 self.equipped_tool = None
                 print("DEBUG: Tool broke and was removed")
+
+    def update_energy(self, dt):
+        """Update player energy regeneration."""
+        # Base regeneration rate (energy per second)
+        base_regen_rate = 2.0
+        
+        # Modify regeneration based on conditions
+        if hasattr(self, 'is_moving') and self.is_moving:
+            regen_rate = base_regen_rate * 0.5  # Reduced regeneration while moving
+        elif self.attacking:
+            regen_rate = base_regen_rate * 0.25  # Greatly reduced while attacking
+        else:
+            regen_rate = base_regen_rate  # Full regeneration while idle
+        
+        # Apply regeneration
+        self.energy = min(self.max_energy, self.energy + regen_rate * dt)
+
+    def collect_energy_core(self, amount):
+        """Handle energy core collection."""
+        base_energy_restore = 20
+        bonus_energy = amount * 5  # Scale with core value
+        
+        self.energy = min(self.max_energy, self.energy + base_energy_restore + bonus_energy)
 

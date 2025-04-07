@@ -179,7 +179,7 @@ class Enemy:
         # Check collision
         if enemy_rect.colliderect(projectile_rect):
             # Take damage
-            self.health -= 10
+            self.health -= 20
             
             # Play hit sound
             self.effects.play_hit_sound()

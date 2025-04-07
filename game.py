@@ -15,7 +15,8 @@ from worldObject import WorldObjects
 pygame.init()
 
 # Game window settings
-SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
+SCREEN_WIDTH, SCREEN_HEIGHT = 1280, 720
+#SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 WIDTH, HEIGHT = SCREEN_WIDTH, SCREEN_HEIGHT
 TILE_SIZE = 32  # Define TILE_SIZE here
 BG_COLOR = (10, 10, 25)  # Dark blue background
@@ -646,6 +647,10 @@ class Game:
         if not self.show_crafting:
             # Process movement
             moving = self.player.move(keys, self.world_generator)
+            self.player.is_moving = moving  # Add this line to track movement state
+            
+            # Update player energy
+            self.player.update_energy(dt)  # Add this line
             
             # Handle tool usage with E key
             if keys[pygame.K_e] and self.player.equipped_tool:
@@ -1269,6 +1274,11 @@ class Game:
         # Border
         pygame.draw.rect(self.screen, WHITE, (health_x, health_y, health_width, health_height), 2)
         
+        # Health text
+        health_text = self.font_sm.render(f"{int(self.player.health)}/{self.player.max_health}", True, WHITE)
+        health_text_rect = health_text.get_rect(center=(health_x + health_width//2, health_y + health_height//2))
+        self.screen.blit(health_text, health_text_rect)
+        
         # Draw energy bar
         energy_width = 200
         energy_height = 10
@@ -1285,6 +1295,11 @@ class Game:
         
         # Border
         pygame.draw.rect(self.screen, WHITE, (energy_x, energy_y, energy_width, energy_height), 1)
+        
+        # Energy text
+        energy_text = self.font_sm.render(f"{int(self.player.energy)}/{self.player.max_energy}", True, WHITE)
+        energy_text_rect = energy_text.get_rect(midleft=(energy_x + energy_width + 10, energy_y + energy_height//2))
+        self.screen.blit(energy_text, energy_text_rect)
         
         # Draw shield bar if player has shield
         if self.player.shield > 0:
@@ -2351,9 +2366,9 @@ class Game:
         # Initialize player inventory with DEBUG resources for testing
         # Comment these out when testing resource collection
         self.player.inventory = {
-            "code_fragments": 10,  # DEBUG: Add some resources for testing crafting
-            "energy_cores": 5,     # DEBUG: Add some resources for testing crafting
-            "data_shards": 3       # DEBUG: Add some resources for testing crafting
+            "code_fragments": 0, # DEBUG: Add some resources for testing crafting
+            "energy_cores": 0,     # DEBUG: Add some resources for testing crafting
+            "data_shards": 0       # DEBUG: Add some resources for testing crafting
         }
         
         # Reset crafting menu state
@@ -2426,21 +2441,33 @@ class Game:
         # Power-up sprites
         power_up_types = ["health", "energy", "shield", "damage"]
         for pu_type in power_up_types:
-            # Create placeholder sprites
-            surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-            
-            # Use different colors for different power-up types
-            color = {
-                "health": (255, 0, 0),      # Red
-                "energy": (0, 255, 255),    # Cyan
-                "shield": (255, 255, 0),    # Yellow
-                "damage": (255, 0, 255)     # Magenta
-            }.get(pu_type, (255, 255, 255))
-            
-            pygame.draw.rect(surface, color, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE))
-            pygame.draw.rect(surface, (255, 255, 255), 
-                            pygame.Rect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4), 2)
-            self.power_up_sprites[pu_type] = surface
+            try:
+                # Load power-up image
+                sprite_path = f"spritesheets/resources/powerup_{pu_type}.png"
+                image = pygame.image.load(sprite_path).convert_alpha()
+                
+                # Verify dimensions (48x48)
+                expected_size = 48
+                if image.get_width() != expected_size or image.get_height() != expected_size:
+                    print(f"Warning: Power-up image dimensions incorrect for {pu_type}. Expected {expected_size}x{expected_size}, got {image.get_width()}x{image.get_height()}")
+                    raise ValueError("Invalid dimensions")
+                
+                # Store the image
+                self.power_up_sprites[pu_type] = image
+                
+            except (pygame.error, FileNotFoundError, ValueError) as e:
+                print(f"Error loading power-up image for {pu_type}: {e}")
+                # Create fallback sprite (48x48)
+                surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                color = {
+                    "health": (255, 0, 0),      # Red
+                    "energy": (0, 255, 255),    # Cyan
+                    "shield": (255, 255, 0),    # Yellow
+                    "damage": (255, 0, 255)     # Magenta
+                }.get(pu_type, (255, 255, 255))
+                pygame.draw.rect(surface, color, pygame.Rect(0, 0, TILE_SIZE, TILE_SIZE))
+                pygame.draw.rect(surface, (255, 255, 255), pygame.Rect(2, 2, TILE_SIZE - 4, TILE_SIZE - 4), 2)
+                self.power_up_sprites[pu_type] = surface
         
         # Enemy sprite sheet
         if not self.enemy_sprite_sheet:
@@ -2527,9 +2554,12 @@ class Game:
         # Initialize spawn timer if not exists
         if not hasattr(self, 'power_up_spawn_timer'):
             self.power_up_spawn_timer = 0
-            self.power_up_spawn_interval = 45.0  # Spawn every 45 seconds
-            self.power_up_spawn_chance = 0.7     # 70% chance to spawn when timer is up
-            self.max_power_ups = 3               # Maximum number of power-ups at once
+            #How frequently power-ups appear
+            self.power_up_spawn_interval = 30.0  # Spawn every 45 seconds
+            #Chance of spawning a power-up when the timer is up
+            self.power_up_spawn_chance = 0.8     # 70% chance to spawn when timer is up
+            #Maximum number of power-ups at once
+            self.max_power_ups = 4                # Maximum number of power-ups at once
         
         # Update spawn timer
         self.power_up_spawn_timer += dt
