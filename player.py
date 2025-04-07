@@ -55,6 +55,33 @@ class Player:
             "data_shards": 0
         }
         
+        # Equipment
+        self.equipped_weapon = None
+        self.equipped_tool = None
+        self.crafted_items = []
+        
+        # Crafting recipes
+        self.crafting_recipes = {
+            "energy_sword": {
+                "code_fragments": 5,
+                "energy_cores": 3,
+                "data_shards": 1,
+                "stats": {"damage": 20, "speed": 1.5}
+            },
+            "data_shield": {
+                "code_fragments": 3,
+                "energy_cores": 2,
+                "data_shards": 3,
+                "stats": {"defense": 15, "duration": 10}
+            },
+            "hack_tool": {
+                "code_fragments": 4,
+                "energy_cores": 4,
+                "data_shards": 2,
+                "stats": {"range": 100, "cooldown": 5}
+            }
+        }
+        
         # Check if sprite_sheet is a single surface or a sheet
         if sprite_sheet.get_width() == self.sprite_width and sprite_sheet.get_height() == self.sprite_height:
             # It's a single sprite
@@ -128,30 +155,56 @@ class Player:
             self.sprite_height
         ))
 
-    def move(self, keys):
+    def move(self, keys, world_generator):
         """Handle player movement based on key input."""
         moving = False
         
+        # Store original position in case we need to revert
+        original_x = self.x
+        original_y = self.y
+        
         # Handle movement keys
-        if keys[pygame.K_w]:
+        if keys[pygame.K_UP]:
             self.y -= self.speed
             self.direction = "up"
             moving = True
             
-        if keys[pygame.K_s]:
+        if keys[pygame.K_DOWN]:
             self.y += self.speed
             self.direction = "down"
             moving = True
             
-        if keys[pygame.K_a]:
+        if keys[pygame.K_LEFT]:
             self.x -= self.speed
             self.direction = "left"
             moving = True
             
-        if keys[pygame.K_d]:
+        if keys[pygame.K_RIGHT]:
             self.x += self.speed
             self.direction = "right"
             moving = True
+            
+        # Check if new position is valid
+        if moving and world_generator:
+            # Create player collision rect
+            player_rect = pygame.Rect(self.x, self.y, self.width, self.height)
+            
+            # Check collision with world blocks
+            if not world_generator.is_valid_position(self.x, self.y):
+                # Revert position if collision detected
+                self.x = original_x
+                self.y = original_y
+                moving = False
+                return moving
+            
+            # Check collision with world objects
+            for obj in world_generator.objects:
+                if obj.collides_with(player_rect):
+                    # Revert position if collision detected
+                    self.x = original_x
+                    self.y = original_y
+                    moving = False
+                    return moving
             
         return moving
 
@@ -168,11 +221,18 @@ class Player:
             self.attacking = True
             self.attack_start_time = current_time
             self.effects.play_attack_sound()
+            
+            # Apply weapon damage if equipped
+            self.damage = self.use_equipped_item()
         
         # Handle projectile input
         if keys[pygame.K_f] and current_time - self.last_projectile_time >= self.projectile_cooldown:
             self.fire_projectile()
             self.last_projectile_time = current_time
+            
+        # Handle tool input (e.g., shield)
+        if keys[pygame.K_e] and self.equipped_tool:
+            self.use_tool()
         
         # Choose sprite based on state
         if self.attacking:
@@ -187,6 +247,7 @@ class Player:
             # Check if attack is finished
             if current_time - self.attack_start_time > self.attack_duration:
                 self.attacking = False
+                self.damage = 10  # Reset to base damage
                 
         elif moving:
             # Walking animation
@@ -291,4 +352,143 @@ class Player:
                 return True  # Damage was dealt
                 
         return False  # No damage was dealt
+
+    def can_craft(self, item_name):
+        """Check if player has enough resources to craft an item."""
+        if item_name not in self.crafting_recipes:
+            return False
+            
+        recipe = self.crafting_recipes[item_name]
+        for resource, amount in recipe.items():
+            if resource != "stats" and self.inventory.get(resource, 0) < amount:
+                return False
+        return True
+    
+    def craft_item(self, item_name):
+        """Attempt to craft an item using resources."""
+        print(f"DEBUG: Player.craft_item called for {item_name}")
+        
+        if item_name not in self.crafting_recipes:
+            print(f"DEBUG: Recipe {item_name} not found in recipes: {self.crafting_recipes.keys()}")
+            return False
+            
+        if not self.can_craft(item_name):
+            print(f"DEBUG: Cannot craft {item_name}, insufficient resources")
+            for resource, amount in self.crafting_recipes[item_name].items():
+                if resource != "stats":
+                    has_amount = self.inventory.get(resource, 0)
+                    print(f"DEBUG:   {resource}: have {has_amount}, need {amount}")
+            return False
+            
+        # Deduct resources
+        recipe = self.crafting_recipes[item_name]
+        for resource, amount in recipe.items():
+            if resource != "stats":
+                self.inventory[resource] -= amount
+        
+        # Create the crafted item
+        crafted_item = {
+            "name": item_name,
+            "stats": recipe["stats"].copy(),
+            "durability": 100
+        }
+        
+        # Add to crafted items
+        self.crafted_items.append(crafted_item)
+        print(f"DEBUG: Added {item_name} to crafted_items: {self.crafted_items}")
+        
+        # Auto-equip the newly crafted item - always equip as tool regardless of type
+        # This allows all items to be used with the E key
+        self.equipped_tool = crafted_item
+        print(f"DEBUG: Auto-equipped {item_name} as tool")
+            
+        return True
+
+    def equip_item(self, item_index):
+        """Equip a crafted item."""
+        if 0 <= item_index < len(self.crafted_items):
+            item = self.crafted_items[item_index]
+            if item["name"].endswith(("sword", "blade")):
+                self.equipped_weapon = item
+            else:
+                self.equipped_tool = item
+                
+    def use_equipped_item(self):
+        """Use the currently equipped item."""
+        if self.equipped_weapon:
+            # Apply weapon effects (e.g., increased damage)
+            base_damage = 10
+            weapon_damage = self.equipped_weapon["stats"].get("damage", 0)
+            total_damage = base_damage + weapon_damage
+            
+            # Decrease durability
+            self.equipped_weapon["durability"] -= 1
+            if self.equipped_weapon["durability"] <= 0:
+                self.crafted_items.remove(self.equipped_weapon)
+                self.equipped_weapon = None
+                
+            return total_damage
+            
+        return 10  # Base damage if no weapon equipped
+
+    def use_tool(self):
+        """Use the currently equipped tool."""
+        print(f"DEBUG: Player.use_tool called")
+        
+        if not self.equipped_tool:
+            print("DEBUG: No tool equipped")
+            return
+        
+        print(f"DEBUG: Using tool: {self.equipped_tool['name']}")
+            
+        # Apply tool effects based on type
+        if self.equipped_tool["name"] == "data_shield":
+            # Apply shield effect
+            shield_amount = self.equipped_tool["stats"]["defense"]
+            duration = self.equipped_tool["stats"]["duration"]
+            self.shield = min(100, self.shield + shield_amount)
+            print(f"DEBUG: Applied data_shield, shield now at {self.shield}")
+            
+            # Decrease durability
+            self.equipped_tool["durability"] -= 1
+            print(f"DEBUG: Tool durability now: {self.equipped_tool['durability']}")
+            if self.equipped_tool["durability"] <= 0:
+                self.crafted_items.remove(self.equipped_tool)
+                self.equipped_tool = None
+                print("DEBUG: Tool broke and was removed")
+        elif self.equipped_tool["name"] == "hack_tool":
+            # Apply hack effect (e.g., temporarily disable nearby enemies)
+            hack_range = self.equipped_tool["stats"]["range"]
+            cooldown = self.equipped_tool["stats"]["cooldown"]
+            
+            # Temporary effect - increases energy
+            self.energy = min(self.max_energy, self.energy + 20)
+            print(f"DEBUG: Used hack_tool with range {hack_range}, energy now at {self.energy}")
+            
+            # Decrease durability
+            self.equipped_tool["durability"] -= 1
+            print(f"DEBUG: Tool durability now: {self.equipped_tool['durability']}")
+            if self.equipped_tool["durability"] <= 0:
+                self.crafted_items.remove(self.equipped_tool)
+                self.equipped_tool = None
+                print("DEBUG: Tool broke and was removed")
+        elif self.equipped_tool["name"] == "energy_sword":
+            # Apply damage boost effect
+            damage_boost = self.equipped_tool["stats"]["damage"]
+            speed_boost = self.equipped_tool["stats"]["speed"]
+            
+            # Temporary effect - provides temporary invincibility
+            self.is_invincible = True
+            self.invincibility_timer = pygame.time.get_ticks()
+            self.invincibility_duration = 2000  # 2 seconds of invincibility
+            
+            print(f"DEBUG: Used energy_sword with damage {damage_boost}, invincibility activated")
+            
+            # Decrease durability
+            self.equipped_tool["durability"] -= 1
+            print(f"DEBUG: Tool durability now: {self.equipped_tool['durability']}")
+            if self.equipped_tool["durability"] <= 0:
+                self.crafted_items.remove(self.equipped_tool)
+                self.equipped_tool = None
+                print("DEBUG: Tool broke and was removed")
 

@@ -434,6 +434,7 @@ class Game:
         self.fading_in = False
         self.fading_out = False
         self.next_state = None
+        self.show_crafting = False  # New flag for crafting UI
         
         # Settings
         self.settings = {
@@ -598,35 +599,217 @@ class Game:
                     lambda val: self.update_setting("difficulty", val))
         )
 
-    def handle_gameplay(self, events, dt):
-        """Handle the gameplay state."""
-        # Update camera shake
-        self.update_camera_shake(dt)
-        
-        # Handle player movement and actions
+    def handle_gameplay(self, events=None, dt=1/60):
+        """Handle gameplay state."""
+        if not self.player:
+            return
+            
         keys = pygame.key.get_pressed()
-        moving = False
-        if self.player:
-            moving = self.player.move(keys)
+        
+        # Handle events first to ensure menu toggles are responsive
+        for event in events or []:
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                # Crafting menu toggle
+                if event.key == pygame.K_c:
+                    self.show_crafting = not self.show_crafting
+                    self.play_sound("menu_select")
+                    print(f"Crafting menu {'opened' if self.show_crafting else 'closed'}")  # Debug print
+                
+                # ESC handling
+                elif event.key == pygame.K_ESCAPE:
+                    if self.show_crafting:
+                        self.show_crafting = False
+                        self.play_sound("menu_select")
+                    else:
+                        self.transition_to("pause")
+                
+                # Crafting selection (only when menu is open)
+                elif self.show_crafting and event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:
+                    craft_index = event.key - pygame.K_1  # Convert to 0-based index
+                    print(f"Attempting to craft item {craft_index + 1}")  # Debug print
+                    self.handle_crafting_selection(craft_index)
+                
+                # E key - Tool usage (one-time press detection for feedback)
+                elif event.key == pygame.K_e and not self.show_crafting:
+                    if not self.player.equipped_tool:
+                        self.add_effect("text", self.player.x, self.player.y - 30,
+                                       text="No tool equipped!",
+                                       color=RED,
+                                       size=20,
+                                       duration=2.0)
+                        print("DEBUG: E key pressed but no tool equipped")
+        
+        # Handle continuous gameplay actions when crafting menu is closed
+        if not self.show_crafting:
+            # Process movement
+            moving = self.player.move(keys, self.world_generator)
+            
+            # Handle tool usage with E key
+            if keys[pygame.K_e] and self.player.equipped_tool:
+                self.player.use_tool()
+                self.play_sound("level_up")
+                print("Using equipped tool")  # Debug print
+                
+                # Add visual effect to show tool was used
+                tool_name = self.player.equipped_tool["name"]
+                if tool_name == "data_shield":
+                    effect_text = "Shield activated!"
+                    effect_color = CYAN
+                elif tool_name == "hack_tool":
+                    effect_text = "Hack activated!"
+                    effect_color = GREEN
+                elif tool_name == "energy_sword":
+                    effect_text = "Energy blade activated!"
+                    effect_color = NEON_BLUE
+                else:
+                    effect_text = "Tool activated!"
+                    effect_color = WHITE
+                
+                self.add_effect("text", self.player.x, self.player.y - 30,
+                              text=effect_text,
+                              color=effect_color,
+                              size=20,
+                              duration=1.0)
+                
+                # Add special visual effects based on tool type
+                if tool_name == "energy_sword":
+                    self.add_effect("explosion", self.player.x, self.player.y)
+                elif tool_name == "hack_tool":
+                    self.start_screen_shake(5, 0.5)
             
             # Update player animation
             self.player.animate(moving, keys, self.enemies)
+            
+            # Update game world
+            self.update_game_world(dt)  # Pass the proper dt value
         
-        # Update game world
-        self.update_game_world(dt)
+        # Update camera shake
+        if self.screen_shake_duration > 0:
+            self.screen_shake_duration -= 1
+            if self.screen_shake_duration <= 0:
+                self.camera_offset_x = 0
+                self.camera_offset_y = 0
+            else:
+                self.camera_offset_x = random.randint(-2, 2)
+                self.camera_offset_y = random.randint(-2, 2)
         
-        # Draw game elements
-        if self.player:
-            self.draw_gameplay_elements()
+        # Draw game world
+        self.draw_gameplay_elements()
         
-        # Check if player is defeated
-        if self.player and self.player.health <= 0:
-            self.handle_player_defeat()
+        # Draw crafting UI on top if active
+        if self.show_crafting:
+            self.draw_crafting_ui()
         
-        # Handle pause input
-        for event in events:
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                self.transition_to("pause")
+        # Always draw UI
+        self.draw_gameplay_ui()
+
+    def draw_crafting_ui(self):
+        """Draw the crafting interface."""
+        if not self.player:
+            return
+            
+        # Semi-transparent background
+        overlay = pygame.Surface((WIDTH, HEIGHT))
+        overlay.fill((0, 0, 0))
+        overlay.set_alpha(180)  # Make background more visible
+        self.screen.blit(overlay, (0, 0))
+        
+        # Crafting menu title
+        title = self.font_lg.render("Crafting Menu", True, NEON_BLUE)
+        title_rect = title.get_rect(centerx=WIDTH//2, top=50)
+        self.screen.blit(title, title_rect)
+        
+        # Available recipes
+        y_pos = 150
+        for i, (item_name, recipe) in enumerate(self.player.crafting_recipes.items()):
+            # Item name with key binding
+            can_craft = self.player.can_craft(item_name)
+            color = GREEN if can_craft else RED
+            text = self.font_md.render(f"[{i+1}] {item_name.replace('_', ' ').title()}", True, color)
+            text_rect = text.get_rect(x=WIDTH//4, y=y_pos)
+            self.screen.blit(text, text_rect)
+            
+            # Required resources
+            resource_text = []
+            for resource, amount in recipe.items():
+                if resource != "stats":
+                    has_amount = self.player.inventory.get(resource, 0)
+                    color = GREEN if has_amount >= amount else RED
+                    resource_text.append(self.font_sm.render(
+                        f"{resource.replace('_', ' ').title()}: {has_amount}/{amount}",
+                        True, color
+                    ))
+            
+            # Display resource requirements
+            for j, res_text in enumerate(resource_text):
+                self.screen.blit(res_text, (WIDTH//4 + 20, y_pos + 30 + j*25))
+            
+            # Display item stats
+            stats_text = []
+            for stat, value in recipe["stats"].items():
+                stats_text.append(self.font_sm.render(
+                    f"{stat.title()}: {value}",
+                    True, CYAN
+                ))
+            
+            # Display stats
+            for j, stat_text in enumerate(stats_text):
+                self.screen.blit(stat_text, (WIDTH*3//4, y_pos + 30 + j*25))
+            
+            y_pos += 120
+        
+        # Instructions
+        instructions = [
+            "Press 1-3 to craft items",
+            "Press C or ESC to close",
+            "Press E to use equipped items"
+        ]
+        
+        y_offset = HEIGHT - 100
+        for instruction in instructions:
+            text = self.font_sm.render(instruction, True, WHITE)
+            text_rect = text.get_rect(centerx=WIDTH//2, y=y_offset)
+            self.screen.blit(text, text_rect)
+            y_offset += 25
+
+    def handle_crafting_selection(self, index):
+        """Handle crafting item selection."""
+        if not self.player:
+            return
+            
+        print(f"DEBUG: Crafting selection called with index {index}")
+            
+        # Get the item name from the recipe list
+        recipes = list(self.player.crafting_recipes.keys())
+        if 0 <= index < len(recipes):
+            item_name = recipes[index]
+            print(f"DEBUG: Attempting to craft {item_name}")
+            print(f"DEBUG: Player inventory: {self.player.inventory}")
+            
+            # Attempt to craft the item
+            if self.player.craft_item(item_name):
+                self.play_sound("level_up")  # Success sound
+                self.add_effect("text", self.player.x, self.player.y - 30,
+                              text=f"Crafted {item_name.replace('_', ' ').title()}!",
+                              color=GREEN,
+                              size=20,
+                              duration=2.0)
+                print(f"DEBUG: Successfully crafted {item_name}")
+                print(f"DEBUG: Updated inventory: {self.player.inventory}")
+                print(f"DEBUG: Player crafted items: {self.player.crafted_items}")
+            else:
+                self.play_sound("menu_select")  # Failure sound
+                self.add_effect("text", self.player.x, self.player.y - 30,
+                              text="Not enough resources!",
+                              color=RED,
+                              size=20,
+                              duration=2.0)
+                print(f"DEBUG: Failed to craft {item_name}")
+        else:
+            print(f"DEBUG: Invalid craft index {index}, available recipes: {recipes}")
 
     def update_game_world(self, dt):
         """Update game world entities and check collisions."""
@@ -730,7 +913,7 @@ class Game:
         
         # Calculate enemies based on wave and difficulty
         base_enemies = 3 + self.wave_number
-        difficulty_mult = {"Easy": 0.7, "Normal": 1.0, "Hard": 1.5}
+        difficulty_mult = {"Easy": 0.7, "Normal": 1.0, "Hard": 2.0}
         difficulty_factor = difficulty_mult.get(self.settings["difficulty"], 1.0)
         
         self.enemies_to_spawn = int(base_enemies * difficulty_factor)
@@ -1065,65 +1248,140 @@ class Game:
         self.draw_gameplay_ui()
 
     def draw_gameplay_ui(self):
-        """Draw gameplay UI elements."""
-        # Draw score
-        score_text = self.font_md.render(f"Score: {self.score}", True, WHITE)
-        self.screen.blit(score_text, (20, 20))
+        """Draw the gameplay UI elements."""
+        if not self.player:
+            return
         
-        # Draw wave number
+        # Draw health bar
+        health_width = 200
+        health_height = 20
+        health_x = 20
+        health_y = 20
+        health_fill = max(0, min(1, self.player.health / self.player.max_health))
+        
+        # Background
+        pygame.draw.rect(self.screen, GRAY, (health_x, health_y, health_width, health_height))
+        
+        # Fill
+        pygame.draw.rect(self.screen, RED, 
+                       (health_x, health_y, int(health_width * health_fill), health_height))
+        
+        # Border
+        pygame.draw.rect(self.screen, WHITE, (health_x, health_y, health_width, health_height), 2)
+        
+        # Draw energy bar
+        energy_width = 200
+        energy_height = 10
+        energy_x = health_x
+        energy_y = health_y + health_height + 5
+        energy_fill = max(0, min(1, self.player.energy / self.player.max_energy))
+        
+        # Background
+        pygame.draw.rect(self.screen, GRAY, (energy_x, energy_y, energy_width, energy_height))
+        
+        # Fill
+        pygame.draw.rect(self.screen, CYAN, 
+                       (energy_x, energy_y, int(energy_width * energy_fill), energy_height))
+        
+        # Border
+        pygame.draw.rect(self.screen, WHITE, (energy_x, energy_y, energy_width, energy_height), 1)
+        
+        # Draw shield bar if player has shield
+        if self.player.shield > 0:
+            shield_width = 200
+            shield_height = 5
+            shield_x = health_x
+            shield_y = energy_y + energy_height + 5
+            shield_fill = max(0, min(1, self.player.shield / 100))  # Assuming max shield is 100
+            
+            # Background
+            pygame.draw.rect(self.screen, GRAY, (shield_x, shield_y, shield_width, shield_height))
+            
+            # Fill
+            pygame.draw.rect(self.screen, YELLOW, 
+                           (shield_x, shield_y, int(shield_width * shield_fill), shield_height))
+            
+            # Border
+            pygame.draw.rect(self.screen, WHITE, (shield_x, shield_y, shield_width, shield_height), 1)
+        
+        # Draw score and wave
+        score_text = self.font_md.render(f"Score: {self.score}", True, WHITE)
+        self.screen.blit(score_text, (WIDTH - score_text.get_width() - 20, 20))
+        
         wave_text = self.font_md.render(f"Wave: {self.wave_number}", True, WHITE)
-        self.screen.blit(wave_text, (20, 50))
+        self.screen.blit(wave_text, (WIDTH - wave_text.get_width() - 20, 50))
         
         # Draw survival time
         minutes = int(self.survival_time // 60)
         seconds = int(self.survival_time % 60)
         time_text = self.font_md.render(f"Time: {minutes:02d}:{seconds:02d}", True, WHITE)
-        self.screen.blit(time_text, (20, 80))
+        self.screen.blit(time_text, (WIDTH - time_text.get_width() - 20, 80))
         
-        # Draw player health bar
-        if self.player:
-            # Health bar background
-            pygame.draw.rect(self.screen, GRAY, (WIDTH - 220, 20, 200, 20))
+        # Draw inventory
+        inventory_x = 20
+        inventory_y = HEIGHT - 120
+        
+        # Draw inventory background
+        inventory_width = 200
+        inventory_height = 100
+        pygame.draw.rect(self.screen, (0, 0, 0, 128), 
+                       (inventory_x, inventory_y, inventory_width, inventory_height))
+        pygame.draw.rect(self.screen, WHITE, 
+                       (inventory_x, inventory_y, inventory_width, inventory_height), 1)
+        
+        # Draw inventory title
+        inventory_title = self.font_sm.render("Inventory", True, WHITE)
+        self.screen.blit(inventory_title, 
+                       (inventory_x + 10, inventory_y + 5))
+        
+        # Draw inventory contents
+        y_offset = inventory_y + 30
+        for resource, amount in self.player.inventory.items():
+            resource_text = self.font_sm.render(
+                f"{resource.replace('_', ' ').title()}: {amount}", 
+                True, WHITE
+            )
+            self.screen.blit(resource_text, (inventory_x + 20, y_offset))
+            y_offset += 20
             
-            # Health bar fill
-            health_percent = self.player.health / self.player.max_health
-            pygame.draw.rect(self.screen, RED, 
-                             (WIDTH - 220, 20, int(200 * health_percent), 20))
+        # Draw equipped tool info
+        if self.player.equipped_tool:
+            tool_x = WIDTH - 220
+            tool_y = HEIGHT - 100
             
-            # Health text
-            health_text = self.font_sm.render(f"Health: {self.player.health}/{self.player.max_health}", 
-                                            True, WHITE)
-            self.screen.blit(health_text, (WIDTH - 220, 45))
+            # Draw tool background
+            pygame.draw.rect(self.screen, (0, 0, 0, 128), 
+                           (tool_x, tool_y, 200, 80))
+            pygame.draw.rect(self.screen, CYAN, 
+                           (tool_x, tool_y, 200, 80), 1)
             
-            # Energy bar
-            pygame.draw.rect(self.screen, GRAY, (WIDTH - 220, 70, 200, 15))
+            # Tool title
+            tool_name = self.player.equipped_tool["name"].replace("_", " ").title()
+            tool_title = self.font_sm.render(f"Equipped: {tool_name}", True, CYAN)
+            self.screen.blit(tool_title, (tool_x + 10, tool_y + 10))
             
-            energy_percent = self.player.energy / self.player.max_energy
-            pygame.draw.rect(self.screen, NEON_BLUE, 
-                             (WIDTH - 220, 70, int(200 * energy_percent), 15))
+            # Tool stats
+            stats_y = tool_y + 30
+            for stat, value in self.player.equipped_tool["stats"].items():
+                stat_text = self.font_sm.render(f"{stat.title()}: {value}", True, WHITE)
+                self.screen.blit(stat_text, (tool_x + 20, stats_y))
+                stats_y += 20
+                
+            # Tool durability
+            durability = self.player.equipped_tool["durability"]
+            durability_color = GREEN if durability > 50 else YELLOW if durability > 25 else RED
+            durability_text = self.font_sm.render(f"Durability: {durability}%", True, durability_color)
+            self.screen.blit(durability_text, (tool_x + 20, stats_y))
             
-            energy_text = self.font_sm.render(f"Energy: {int(self.player.energy)}/{self.player.max_energy}", 
-                                             True, WHITE)
-            self.screen.blit(energy_text, (WIDTH - 220, 90))
-            
-            # Draw inventory
-            if hasattr(self.player, "inventory"):
-                y_pos = 120
-                for res_type, count in self.player.inventory.items():
-                    if res_type in self.resource_sprites:
-                        # Draw resource icon
-                        scaled_sprite = pygame.transform.scale(
-                            self.resource_sprites[res_type], 
-                            (24, 24)
-                        )
-                        self.screen.blit(scaled_sprite, (WIDTH - 220, y_pos))
-                        
-                        # Draw count
-                        res_text = self.font_sm.render(f"{res_type.capitalize()}: {count}", 
-                                                     True, WHITE)
-                        self.screen.blit(res_text, (WIDTH - 185, y_pos + 4))
-                        
-                        y_pos += 30
+            # Tool usage hint
+            hint_text = self.font_sm.render("Press E to use", True, WHITE)
+            self.screen.blit(hint_text, (tool_x + 50, tool_y + 70))
+        
+        # Draw FPS in top right if enabled
+        if self.settings.get("show_fps", True):
+            fps = int(self.clock.get_fps())
+            fps_text = self.font_sm.render(f"FPS: {fps}", True, WHITE)
+            self.screen.blit(fps_text, (WIDTH - fps_text.get_width() - 10, 110))
 
     def handle_player_defeat(self):
         """Handle player defeat logic."""
@@ -1234,10 +1492,12 @@ class Game:
         # Draw controls info
         controls_text = [
             "CONTROLS:",
-            "WASD - Move",
+            "Arrow Keys - Move",
             "SPACE - Melee Attack",
             "F - Ranged Attack",
-            "ESC - Pause/Menu"
+            "ESC - Pause/Menu",
+            "E - Use Tool",
+            "C - Craft"
         ]
         
         for i, text in enumerate(controls_text):
@@ -2065,7 +2325,6 @@ class Game:
         self.effects_list = []
         
         # Load sprites
-        # For a quick placeholder using pygame's built-in shapes
         self.load_sprites()
         
         # Create player at center of screen
@@ -2089,8 +2348,28 @@ class Game:
         self.player.max_energy = 100
         self.player.is_dashing = False
         
-        # Spawn initial resources
-        self.spawn_resources(10)
+        # Initialize player inventory with DEBUG resources for testing
+        # Comment these out when testing resource collection
+        self.player.inventory = {
+            "code_fragments": 10,  # DEBUG: Add some resources for testing crafting
+            "energy_cores": 5,     # DEBUG: Add some resources for testing crafting
+            "data_shards": 3       # DEBUG: Add some resources for testing crafting
+        }
+        
+        # Reset crafting menu state
+        self.show_crafting = False
+        
+        # Spawn initial resources (increased amount)
+        self.spawn_resources(10)  # Spawn resources in the world
+        
+        # Debug print available recipes and inventory
+        print("DEBUG: Player inventory initialized with:")
+        for resource, amount in self.player.inventory.items():
+            print(f"  {resource}: {amount}")
+        
+        print("DEBUG: Available crafting recipes:")
+        for item_name, recipe in self.player.crafting_recipes.items():
+            print(f"  {item_name}: {recipe}")
         
         # Start first wave
         self.start_new_wave()
@@ -2245,6 +2524,22 @@ class Game:
 
     def update_power_ups(self, dt):
         """Update power-ups and check for collection."""
+        # Initialize spawn timer if not exists
+        if not hasattr(self, 'power_up_spawn_timer'):
+            self.power_up_spawn_timer = 0
+            self.power_up_spawn_interval = 45.0  # Spawn every 45 seconds
+            self.power_up_spawn_chance = 0.7     # 70% chance to spawn when timer is up
+            self.max_power_ups = 3               # Maximum number of power-ups at once
+        
+        # Update spawn timer
+        self.power_up_spawn_timer += dt
+        
+        # Check if it's time to try spawning a power-up
+        if self.power_up_spawn_timer >= self.power_up_spawn_interval:
+            self.power_up_spawn_timer = 0
+            if len(self.power_ups) < self.max_power_ups and random.random() < self.power_up_spawn_chance:
+                self.spawn_random_power_up()
+        
         # Update each power-up
         for power_up in self.power_ups[:]:
             # Update animation if needed
@@ -2265,6 +2560,46 @@ class Game:
         
         # Check collection
         self.check_power_up_collection()
+
+    def spawn_random_power_up(self):
+        """Spawn a power-up at a random location away from the player."""
+        if not self.player:
+            return
+            
+        # Find a suitable spawn position
+        max_attempts = 10
+        min_distance = 200  # Minimum distance from player
+        max_distance = 400  # Maximum distance from player
+        
+        for _ in range(max_attempts):
+            # Generate random position
+            x = random.randint(100, WIDTH - 100)
+            y = random.randint(100, HEIGHT - 100)
+            
+            # Calculate distance from player
+            dist = ((self.player.x - x) ** 2 + (self.player.y - y) ** 2) ** 0.5
+            
+            # Check if position is valid
+            if min_distance <= dist <= max_distance:
+                # Spawn power-up
+                self.spawn_power_up(x, y)
+                
+                # Add spawn effect
+                self.add_effect("text", x, y - 20, 
+                              text="Power-up!", 
+                              color=NEON_BLUE, 
+                              size=20, 
+                              duration=1.0)
+                return
+                
+        # If no suitable position found after max attempts, spawn at a default position
+        edge_spawn = random.choice([
+            (random.randint(100, WIDTH - 100), 100),                  # Top
+            (random.randint(100, WIDTH - 100), HEIGHT - 100),        # Bottom
+            (100, random.randint(100, HEIGHT - 100)),                # Left
+            (WIDTH - 100, random.randint(100, HEIGHT - 100))         # Right
+        ])
+        self.spawn_power_up(edge_spawn[0], edge_spawn[1])
 
     def spawn_power_up(self, x, y):
         """Spawn a power-up at the specified position."""
