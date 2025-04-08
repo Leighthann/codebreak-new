@@ -21,6 +21,8 @@ class Enemy:
         self.server_url = server_url
         self.active = False  # Initialize the 'active' attribute
         self.effects = GameEffects()
+        self.width = 48  # Set default width for the enemy
+        self.height = 48  # Set default height for the enemy
         
         if sprite_sheet.get_width() >= 192 and sprite_sheet.get_height() >= 288:
             self.walk_right = [self.get_frame(sprite_sheet, i, 0) for i in range(4)]
@@ -59,13 +61,13 @@ class Enemy:
         if update["resource_type"] == "health_potion":
             self.health = min(self.max_health, self.health + 10)
 
-    def update(self, player):
+    async def update(self, player):
         if not player:
             return
         distance = ((self.x - player.x) ** 2 + (self.y - player.y) ** 2) ** 0.5
         if distance < self.attack_range:
             self.state = "attack"
-            self.attack_player(player)
+            await self.attack_player(player)
         elif distance < self.chase_range:
             self.state = "chase"
             self.chase_player(player)
@@ -87,6 +89,35 @@ class Enemy:
             update_data = json.dumps({"type": "enemy_update", "x": self.x, "y": self.y, "health": self.health})
             await websocket.send(update_data)
 
-    def attack_player(self, player):
+    async def attack_player(self, player):
         if player.decrease_health(self.damage):
             self.effects.play_attack_sound()
+
+    def collides_with(self, projectile):
+        """Check if this enemy collides with a projectile or other object"""
+        # Simple rectangular collision detection
+        enemy_rect = pygame.Rect(self.x, self.y, self.width, self.height)
+        
+        # If projectile is a dictionary (as in the Player class)
+        if isinstance(projectile, dict):
+            # Assume projectile has x, y coordinates and is circular with radius 5
+            projectile_x = projectile.get("x", 0)
+            projectile_y = projectile.get("y", 0)
+            projectile_radius = 5  # Default radius for projectiles
+            
+            # Check if the projectile's center is inside the enemy's rectangle
+            # or if it's close enough to the edges (within radius distance)
+            if (projectile_x >= self.x - projectile_radius and 
+                projectile_x <= self.x + self.width + projectile_radius and
+                projectile_y >= self.y - projectile_radius and
+                projectile_y <= self.y + self.height + projectile_radius):
+                return True
+                
+        # If projectile is another game object with x, y, width, height
+        elif hasattr(projectile, 'x') and hasattr(projectile, 'y'):
+            if hasattr(projectile, 'width') and hasattr(projectile, 'height'):
+                projectile_rect = pygame.Rect(projectile.x, projectile.y, 
+                                           projectile.width, projectile.height)
+                return enemy_rect.colliderect(projectile_rect)
+            
+        return False

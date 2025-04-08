@@ -26,9 +26,12 @@ BG_COLOR = (10, 10, 25)  # Dark blue background
 # Fonts for UI elements
 
 try:
-    title_font = pygame.font.Font("fonts/cyberpunk.ttf", 60)
-    button_font = pygame.font.Font("fonts/cyberpunk.ttf", 40)
-    info_font = pygame.font.Font("fonts/cyberpunk.ttf", 24)
+    #title_font = pygame.font.Font("fonts/cyberpunk.ttf", 60)
+    # button_font = pygame.font.Font("fonts/cyberpunk.ttf", 40)
+    # info_font = pygame.font.Font("fonts/cyberpunk.ttf", 24)
+    title_font = pygame.font.Font("fonts/PropolishRufftu-BLLyd.ttf", 60)
+    button_font = pygame.font.Font("fonts/GlitchGoblin-2O87v.ttf", 40)
+    info_font = pygame.font.Font("fonts/Valorax-lg25V.otf", 24)
 except:
     print("Warning: Could not load cyberpunk font, using system font")
     title_font = pygame.font.Font(None, 60)
@@ -438,8 +441,10 @@ class Game:
         self.fading_out = False
         self.next_state = None
         self.show_crafting = False  # New flag for crafting UI
-        self.chat_system = ChatSystem(self.font_sm)
-        
+
+        # Load settings if available
+        self.load_settings()
+
         # Settings
         self.settings = {
             "sound_volume": 0.7,
@@ -448,16 +453,16 @@ class Game:
             "show_damage": True,
             "difficulty": "Normal"
         }
-        
-        # Load settings if available
-        self.load_settings()
-        
+
         # Initialize game assets
         self.load_fonts()
         self.load_colors()
         self.load_sounds()
         self.create_ui_elements()
         
+        self.chat_system = ChatSystem(self.font_sm)
+        
+
         # Create game objects
         self.player = None
         self.enemies = []
