@@ -1,0 +1,106 @@
+# Important URL Locations in CodeBreak Codebase
+
+When using MongoDB Atlas and deploying the CodeBreak game, you need to be mindful of several URL locations throughout the codebase. This document lists all the places where URLs need to be reviewed and potentially updated.
+
+## Database Connection URLs
+
+### In `db.py`
+```python
+# MongoDB connection (use environment variables for production)
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
+client = AsyncIOMotorClient(MONGO_URL)
+```
+- This is the primary MongoDB connection string
+- Should be updated to your Atlas connection URL in the .env file
+- Format will be: `mongodb+srv://username:password@cluster.mongodb.net/codebreak_db?retryWrites=true&w=majority`
+
+## Server API URLs
+
+### In `login.py`
+```python
+base_url = "http://localhost:8000"
+url = f"{base_url}/register/user"
+```
+- Used for registration and login API calls
+- Update if your server is running on a different IP or port
+- Consider centralizing this in a configuration file
+
+### In `player.py`
+```python
+self.server_url = "http://localhost:8000"
+```
+- Used for HTTP requests from the player to the server
+- Update to match your actual server location
+- Should match the URL used in login.py
+
+### Player Authentication Methods
+```python
+url = f"{self.server_url}/register/"
+```
+```python
+url = f"{self.server_url}/token"
+```
+- Used for player registration and token acquisition
+- Will need to be updated if server location changes
+
+## WebSocket URLs
+
+### In `player.py`
+```python
+self.ws = await websockets.connect(f"ws://localhost:8000/ws/{self.username}")
+```
+- WebSocket connection URL
+- Used for real-time game updates
+- Note the protocol is "ws://" (or "wss://" for secure connections)
+
+### In `player.py` with authentication
+```python
+self.ws = await websockets.connect(
+    f"ws://localhost:8000/ws/{self.username}?token={self.auth_token}"
+)
+```
+- Authenticated WebSocket connection
+- Contains sensitive token information
+
+### In `enemy.py`
+```python
+async with websockets.connect(self.server_url) as websocket:
+```
+- Enemy WebSocket connection
+- server_url is passed to the enemy constructor
+
+## Configuration Best Practices
+
+1. **Use Environment Variables**
+   - Store all URLs in environment variables
+   - Load with `os.getenv()` or `dotenv`
+   - Never hardcode sensitive connection details
+
+2. **Centralize Configuration**
+   - Consider creating a `config.py` file
+   - Import configuration values from a single source
+   - Makes deployment to different environments easier
+
+3. **Use Relative URLs When Possible**
+   - For API calls within your application
+   - Helps when deploying behind proxies
+
+4. **Secure WebSocket Connections**
+   - Use "wss://" instead of "ws://" for production
+   - Requires proper SSL/TLS setup on your server
+
+5. **Handle Connection Failures Gracefully**
+   - Add error handling around URL connections
+   - Implement retry mechanisms for transient failures
+
+## Development vs. Production
+
+### Development
+- Local MongoDB: `mongodb://localhost:27017/`
+- Local server: `http://localhost:8000` and `ws://localhost:8000/ws/`
+
+### Production
+- Atlas MongoDB: `mongodb+srv://username:password@cluster.mongodb.net/codebreak_db?retryWrites=true&w=majority`
+- Deployed server: `https://your-server-domain.com` and `wss://your-server-domain.com/ws/`
+
+When transitioning between environments, ensure all URLs are updated accordingly.

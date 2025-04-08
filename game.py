@@ -3,14 +3,16 @@ import pygame
 import sys
 import random
 import math
-import time
+import requests
 import os
 import json
-from player import Player
+import asyncio
+from datetime import datetime
 from enemy import Enemy
 from effects import GameEffects
 from world import WorldGenerator
 from worldObject import WorldObjects
+from player import Player
 
 pygame.init()
 
@@ -436,6 +438,7 @@ class Game:
         self.fading_out = False
         self.next_state = None
         self.show_crafting = False  # New flag for crafting UI
+        self.chat_system = ChatSystem(self.font_sm)
         
         # Settings
         self.settings = {
@@ -600,7 +603,7 @@ class Game:
                     lambda val: self.update_setting("difficulty", val))
         )
 
-    def handle_gameplay(self, events=None, dt=1/60):
+    async def handle_gameplay(self, events=None, dt=1/60):
         """Handle gameplay state."""
         if not self.player:
             return
@@ -612,6 +615,8 @@ class Game:
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            elif self.chat_system.handle_event(event, self.player):
+                    continue  # Skip other event processing if chat handled it
             elif event.type == pygame.KEYDOWN:
                 # Crafting menu toggle
                 if event.key == pygame.K_c:
@@ -647,14 +652,20 @@ class Game:
         if not self.show_crafting:
             # Process movement
             moving = self.player.move(keys, self.world_generator)
-            self.player.is_moving = moving  # Add this line to track movement state
+            if asyncio.iscoroutine(moving):
+                self.player.is_moving = await moving  # Await if it's a coroutine
+            else:
+                self.player.is_moving = moving  # Otherwise, assign directly
             
             # Update player energy
             self.player.update_energy(dt)  # Add this line
             
             # Handle tool usage with E key
             if keys[pygame.K_e] and self.player.equipped_tool:
-                self.player.use_tool()
+                if asyncio.iscoroutinefunction(self.player.use_tool):
+                    await self.player.use_tool()
+                else:
+                    await self.player.use_tool()
                 self.play_sound("level_up")
                 print("Using equipped tool")  # Debug print
                 
@@ -686,7 +697,13 @@ class Game:
                     self.start_screen_shake(5, 0.5)
             
             # Update player animation
-            self.player.animate(moving, keys, self.enemies)
+            if asyncio.iscoroutinefunction(self.player.animate):
+                await self.player.animate(moving, keys, self.enemies)
+            else:
+                if asyncio.iscoroutinefunction(self.player.animate):
+                    await self.player.animate(moving, keys, self.enemies)
+                else:
+                    await self.player.animate(moving, keys, self.enemies)
             
             # Update game world
             self.update_game_world(dt)  # Pass the proper dt value
@@ -839,6 +856,10 @@ class Game:
         # Update visual effects
         self.update_visual_effects(dt)
 
+        # Update chat system
+        self.chat_system.update()
+
+
     def update_enemies(self, dt):
         """Update all enemy entities."""
         # Use a copy of the list for safe iteration
@@ -964,7 +985,7 @@ class Game:
             y = random.randint(50, HEIGHT - 50)
         
         # Create enemy
-        enemy = Enemy(self.enemy_sprite_sheet, x, y)
+        enemy = Enemy(self.enemy_sprite_sheet, x, y, server_url="http://example.com")
         enemy.active = True
         
         # Scale stats based on wave
@@ -1252,6 +1273,10 @@ class Game:
         # Draw UI elements on top of the world
         self.draw_gameplay_ui()
 
+        # Draw chat system on top of everything
+        self.chat_system.draw(self.screen)
+
+
     def draw_gameplay_ui(self):
         """Draw the gameplay UI elements."""
         if not self.player:
@@ -1397,67 +1422,6 @@ class Game:
             fps = int(self.clock.get_fps())
             fps_text = self.font_sm.render(f"FPS: {fps}", True, WHITE)
             self.screen.blit(fps_text, (WIDTH - fps_text.get_width() - 10, 110))
-
-    def handle_player_defeat(self):
-        """Handle player defeat logic."""
-        # Play game over sound
-        self.play_sound("game_over")
-        
-        # Create explosion particle effect
-        for _ in range(30):
-            angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(2, 5)
-            self.effects_list.append({
-                "type": "particle",
-                "position": (self.player.x + self.player.width // 2, 
-                           self.player.y + self.player.height // 2) if self.player else (0, 0),
-                "velocity": (math.cos(angle) * speed, math.sin(angle) * speed),
-                "color": (255, 100, 50),
-                "size": random.uniform(2, 6),
-                "duration": random.randint(30, 60),
-                "timer": 0
-            })
-        
-        # Add game over text
-        self.effects_list.append({
-            "type": "text",
-            "text": "GAME OVER",
-            "position": (WIDTH // 2, HEIGHT // 2),
-            "color": (255, 0, 0),
-            "size": 80,
-            "duration": 180,
-            "timer": 0,
-            "fade_in": True
-        })
-        
-        # Add score text
-        self.effects_list.append({
-            "type": "text",
-            "text": f"SCORE: {self.score}",
-            "position": (WIDTH // 2, HEIGHT // 2 + 80),
-            "color": (255, 255, 255),
-            "size": 40,
-            "duration": 180,
-            "timer": 0,
-            "fade_in": True
-        })
-        
-        # Return to menu after delay
-        self.player = None  # Remove player to prevent further updates
-        pygame.time.set_timer(pygame.USEREVENT, 3000)  # 3 second timer
-        
-        # Set up one-time event handler
-        def handle_game_over_event(event):
-            if event.type == pygame.USEREVENT:
-                pygame.time.set_timer(pygame.USEREVENT, 0)  # Disable timer
-                pygame.event.set_allowed(None)  # Reset event filtering
-                self.transition_to("menu")
-                return True
-            return False
-        
-        # Add event handler
-        pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.USEREVENT])  # Filter events
-
 
     def update_transition(self, dt):
         """Update the screen transition effect."""
@@ -1993,7 +1957,7 @@ class Game:
         else:
             self.screen_offset = (0, 0)
 
-    def run(self):
+    async def run(self):
         """Main game loop."""
         running = True
         while running:
@@ -2009,7 +1973,7 @@ class Game:
                     running = False
             
             # Handle game state
-            self.handle_state(events, dt)
+            await self.handle_state(events, dt)
             
             # Update display
             pygame.display.flip()
@@ -2020,7 +1984,7 @@ class Game:
         # Clean up and quit
         pygame.quit()
 
-    def handle_state(self, events, dt):
+    async def handle_state(self, events, dt):
         """Handle the current game state."""
         # Handle state transitions
         if self.fading_out or self.fading_in:
@@ -2031,7 +1995,7 @@ class Game:
         if self.current_state == "menu":
             self.handle_menu(events, dt)
         elif self.current_state == "gameplay":
-            self.handle_gameplay(events, dt)
+              await self.handle_gameplay(events, dt)
         elif self.current_state == "pause":
             self.handle_pause(events, dt)
         elif self.current_state == "settings":
@@ -2102,42 +2066,6 @@ class Game:
                         break
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self.transition_to("gameplay")
-
-    def handle_game_over(self, events, dt):
-        """Handle the game over state."""
-        # Draw background
-        self.draw_menu_background(dt)
-        
-        # Draw game over title
-        title_text = self.font_xl.render("GAME OVER", True, NEON_RED)
-        title_pos = (WIDTH // 2 - title_text.get_width() // 2, 150)
-        self.screen.blit(title_text, title_pos)
-        
-        # Draw score
-        score_text = self.font_md.render(f"SCORE: {self.score}", True, WHITE)
-        score_pos = (WIDTH // 2 - score_text.get_width() // 2, 220)
-        self.screen.blit(score_text, score_pos)
-        
-        # Draw survival time
-        minutes = int(self.survival_time // 60)
-        seconds = int(self.survival_time % 60)
-        time_text = self.font_md.render(f"SURVIVAL TIME: {minutes:02d}:{seconds:02d}", 
-                                       True, WHITE)
-        time_pos = (WIDTH // 2 - time_text.get_width() // 2, 260)
-        self.screen.blit(time_text, time_pos)
-        
-        # Update and draw buttons
-        mouse_pos = pygame.mouse.get_pos()
-        for button in self.game_over_buttons:
-            button.update(mouse_pos)
-            button.draw(self.screen, self.font_md)
-        
-        # Handle button events
-        for event in events:
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                for button in self.game_over_buttons:
-                    if button.handle_event(event):
-                        break
 
     def handle_settings(self, events, dt):
         """Handle the settings state."""
@@ -2339,6 +2267,7 @@ class Game:
         self.power_ups = []
         self.effects_list = []
         
+        
         # Load sprites
         self.load_sprites()
         
@@ -2355,7 +2284,10 @@ class Game:
         self.player = Player(self.player_sprite_sheet, 
                             WIDTH // 2 - TILE_SIZE // 2, 
                             HEIGHT // 2 - TILE_SIZE // 2)
-        
+        #self.player.game_ref = self  # Add this line
+        self.player.game_ref = self
+
+
         # Initialize player attributes
         self.player.health = 100
         self.player.max_health = 100
@@ -2370,6 +2302,13 @@ class Game:
             "energy_cores": 0,     # DEBUG: Add some resources for testing crafting
             "data_shards": 0       # DEBUG: Add some resources for testing crafting
         }
+
+        def register_player(username):
+            url = "http://localhost:8000/register/"
+            response = requests.post(url, params={"username": username})
+            print(response.json())
+
+        register_player("Player1")  # Register "Player1"
         
         # Reset crafting menu state
         self.show_crafting = False
@@ -2733,7 +2672,369 @@ class Game:
         elif self.current_state == "pause":
             self.transition_to("gameplay")
 
-# This ensures the Game class is only instantiated when the script is run directly
-if __name__ == "__main__":
-    game = Game()
-    game.run()
+# Add these methods to your Game class for authentication
+
+    def load_auth_token(self):
+        """Load authentication token from file"""
+        try:
+            if os.path.exists("auth_token.json"):
+                with open("auth_token.json", "r") as f:
+                    auth_data = json.load(f)
+                    self.auth_token = auth_data.get("token")
+                    self.username = auth_data.get("username")
+                    print(f"Loaded auth token for user: {self.username}")
+                return True
+            return False
+        except Exception as e:
+            print(f"Error loading auth token: {e}")
+        return False
+
+
+    def initialize_game_world_with_auth(self):
+        """Initialize game world with authentication"""
+        # First try to load auth token
+        has_auth = self.load_auth_token()
+        
+        # Create world generator
+        self.world_generator = WorldGenerator(WIDTH, HEIGHT, TILE_SIZE)
+        
+        # Reset game metrics
+        self.score = 0
+        self.survival_time = 0
+        self.wave_number = 0
+   
+        # Clear game objects
+        self.enemies = []
+        self.resources = []
+        self.power_ups = []
+        self.effects_list = []
+    
+        # Load sprites
+        self.load_sprites()
+    
+        # Create player at center of screen
+        if not self.player_sprite_sheet:
+            # Create a placeholder sprite
+            player_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+            player_surface.fill((0, 200, 0))  # Green square
+            pygame.draw.circle(player_surface, (255, 255, 255), 
+                        (TILE_SIZE // 2, TILE_SIZE // 2), TILE_SIZE // 3)
+            self.player_sprite_sheet = player_surface
+    
+        #   Create player
+        self.player = Player(self.player_sprite_sheet, 
+                        WIDTH // 2 - TILE_SIZE // 2, 
+                        HEIGHT // 2 - TILE_SIZE // 2)
+    
+        # Initialize player attributes
+        self.player.health = 100
+        self.player.max_health = 100
+        self.player.energy = 100
+        self.player.max_energy = 100
+        self.player.is_dashing = False
+    
+        # Set player username if authenticated
+        if has_auth:
+            self.player.username = self.username
+            self.player.auth_token = self.auth_token
+    
+        # Initialize player inventory
+        self.player.inventory = {
+            "code_fragments": 0,
+            "energy_cores": 0,
+            "data_shards": 0
+        }
+    
+        # Start async task to connect to server
+        asyncio.create_task(self.player.initialize_server_connection())
+    
+        # Reset crafting menu state
+        self.show_crafting = False
+    
+        # Spawn initial resources
+        self.spawn_resources(10)
+    
+        # Start first wave
+        self.start_new_wave()
+
+    def handle_game_over(self, events, dt):
+        """Handle game over state and send score to server"""
+    # Draw background
+        self.draw_menu_background(dt)
+    
+        # Draw game over title
+        title_text = self.font_xl.render("GAME OVER", True, NEON_RED)
+        title_pos = (WIDTH // 2 - title_text.get_width() // 2, 150)
+        self.screen.blit(title_text, title_pos)
+    
+        # Draw score
+        score_text = self.font_md.render(f"SCORE: {self.score}", True, WHITE)
+        score_pos = (WIDTH // 2 - score_text.get_width() // 2, 220)
+        self.screen.blit(score_text, score_pos)
+    
+        # Draw survival time
+        minutes = int(self.survival_time // 60)
+        seconds = int(self.survival_time % 60)
+        time_text = self.font_md.render(f"SURVIVAL TIME: {minutes:02d}:{seconds:02d}", 
+                                  True, WHITE)
+        time_pos = (WIDTH // 2 - time_text.get_width() // 2, 260)
+        self.screen.blit(time_text, time_pos)
+    
+        # Update and draw buttons
+        mouse_pos = pygame.mouse.get_pos()
+        for button in self.game_over_buttons:
+            button.update(mouse_pos)
+            button.draw(self.screen, self.font_md)
+    
+        # Handle button events
+        for event in events:
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                for button in self.game_over_buttons:
+                    if button.handle_event(event):
+                        break
+    
+        # If this is the first time processing game over, send score to server
+        if not hasattr(self, 'score_submitted') or not self.score_submitted:
+            if hasattr(self, 'auth_token') and self.auth_token:
+                # Submit the score using auth token
+                headers = {"Authorization": f"Bearer {self.auth_token}"}
+                try:
+                    data = {
+                        "score": self.score,
+                        "wave_reached": self.wave_number,
+                        "survival_time": self.survival_time
+                    }
+                    response = requests.post("http://localhost:8000/leaderboard/", 
+                                        json=data, headers=headers)
+                    if response.status_code == 200:
+                        print("Score submitted successfully")
+                    else:
+                        print(f"Failed to submit score: {response.text}")
+                except Exception as e:
+                    print(f"Error submitting score: {e}")
+
+            self.score_submitted = True
+
+    def handle_player_defeat(self):
+        """Handle player defeat logic and submit game session data"""
+        # Play game over sound
+        self.play_sound("game_over")
+    
+        # Create explosion particle effect
+        for _ in range(30):
+            angle = random.uniform(0, 2 * math.pi)
+            speed = random.uniform(2, 5)
+            self.effects_list.append({
+                "type": "particle",
+                "position": (self.player.x + self.player.width // 2, 
+                       self.player.y + self.player.height // 2) if self.player else (0, 0),
+                "velocity": (math.cos(angle) * speed, math.sin(angle) * speed),
+                "color": (255, 100, 50),
+                "size": random.uniform(2, 6),
+                "duration": random.randint(30, 60),
+                "timer": 0
+            })
+    
+        # Add game over text
+        self.effects_list.append({
+            "type": "text",
+            "text": "GAME OVER",
+            "position": (WIDTH // 2, HEIGHT // 2),
+            "color": (255, 0, 0),
+            "size": 80,
+            "duration": 180,
+            "timer": 0,
+            "fade_in": True
+        })
+    
+        # Add score text
+        self.effects_list.append({
+            "type": "text",
+            "text": f"SCORE: {self.score}",
+            "position": (WIDTH // 2, HEIGHT // 2 + 80),
+            "color": (255, 255, 255),
+            "size": 40,
+            "duration": 180,
+            "timer": 0,
+            "fade_in": True
+        })
+    
+        # Submit death event via WebSocket
+        if self.player and hasattr(self.player, 'ws') and self.player.ws:
+            try:
+                session_data = {
+                    "action": "player_died",
+                    "session_data": {
+                    "score": self.score,
+                    "enemies_defeated": len(self.enemies),
+                    "waves_completed": self.wave_number,
+                    "survival_time": self.survival_time
+                    }
+                }
+                asyncio.create_task(self.player.ws.send(json.dumps(session_data)))
+            except Exception as e:
+                print(f"Error sending death event: {e}")
+    
+        # Remove player to prevent further updates
+        self.player = None
+    
+        # Set up timer for transition to game over screen
+        pygame.time.set_timer(pygame.USEREVENT, 3000)  # 3 second timer
+    
+        # Set up one-time event handler
+        def handle_game_over_event(event):
+            if event.type == pygame.USEREVENT:
+                pygame.time.set_timer(pygame.USEREVENT, 0)  # Disable timer
+                pygame.event.set_allowed(None)  # Reset event filtering
+                self.transition_to("game_over")
+                return True
+            return False
+    
+        # Add event handler
+        pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.USEREVENT])  # Filter event
+
+class ChatSystem:
+    def __init__(self, font, max_messages=5):
+        self.messages = []
+        self.max_messages = max_messages
+        self.font = font
+        self.input_active = False
+        self.current_message = ""
+        self.input_box = pygame.Rect(20, HEIGHT - 40, 400, 30)
+        self.chat_box = pygame.Rect(10, HEIGHT - (max_messages + 1) * 35, 420, (max_messages + 1) * 35)
+        self.cursor_visible = True
+        self.cursor_timer = 0
+        self.cursor_blink_speed = 30  # Frames per blink
+    
+    def add_message(self, username, message, system_message=False):
+        """Add a new message to the chat"""
+        timestamp = datetime.now().strftime("%H:%M")
+        color = (200, 200, 200)  # Default color
+        
+        if system_message:
+            # System messages in yellow
+            formatted_message = f"[{timestamp}] {message}"
+            color = (255, 255, 0)
+        else:
+            # Player messages include username
+            formatted_message = f"[{timestamp}] {username}: {message}"
+            
+            # Different colors for different users
+            if username == "Player1":  # Current player
+                color = (0, 255, 255)  # Cyan
+            else:
+                # Generate a color based on username
+                username_hash = hash(username) % 1000
+                r = (username_hash % 155) + 100  # 100-255
+                g = ((username_hash // 10) % 155) + 100  # 100-255
+                b = ((username_hash // 100) % 155) + 100  # 100-255
+                color = (r, g, b)
+        
+        self.messages.append({
+            "text": formatted_message,
+            "color": color,
+            "timestamp": datetime.now()
+        })
+        
+        # Limit the number of messages
+        if len(self.messages) > self.max_messages:
+            self.messages.pop(0)
+    
+    def handle_event(self, event, player):
+        """Handle chat input events"""
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_t and not self.input_active:
+                # Open chat on T key
+                self.input_active = True
+                return True
+            
+            if self.input_active:
+                if event.key == pygame.K_RETURN:
+                    # Send message on Enter key
+                    if self.current_message:
+                        # Send message via WebSocket
+                        if player and player.ws:
+                            chat_data = {
+                                "action": "chat_message",
+                                "message": self.current_message
+                            }
+                            asyncio.create_task(player.ws.send(json.dumps(chat_data)))
+                        
+                        # Add to local chat
+                        self.add_message(player.username, self.current_message)
+                        
+                        # Reset input
+                        self.current_message = ""
+                    
+                    # Close input
+                    self.input_active = False
+                    return True
+                
+                elif event.key == pygame.K_ESCAPE:
+                    # Cancel input on Escape
+                    self.current_message = ""
+                    self.input_active = False
+                    return True
+                
+                elif event.key == pygame.K_BACKSPACE:
+                    # Delete character on Backspace
+                    self.current_message = self.current_message[:-1]
+                    return True
+                
+                else:
+                    # Add character to message
+                    self.current_message += event.unicode
+                    return True
+        
+        return False
+    
+    def update(self):
+        """Update chat system state"""
+        # Update cursor blinking
+        self.cursor_timer += 1
+        if self.cursor_timer >= self.cursor_blink_speed:
+            self.cursor_timer = 0
+            self.cursor_visible = not self.cursor_visible
+    
+    def draw(self, surface):
+        """Draw the chat system"""
+        # Only draw chat box if there are messages or input is active
+        if len(self.messages) > 0 or self.input_active:
+            # Draw semi-transparent chat background
+            chat_surface = pygame.Surface((self.chat_box.width, self.chat_box.height), pygame.SRCALPHA)
+            chat_surface.fill((0, 0, 0, 128))  # Semi-transparent black
+            surface.blit(chat_surface, self.chat_box)
+            
+            # Draw messages (most recent at the bottom)
+            for i, message in enumerate(self.messages):
+                msg_surf = self.font.render(message["text"], True, message["color"])
+                y_pos = HEIGHT - (len(self.messages) - i + 1) * 30 - 40
+                surface.blit(msg_surf, (20, y_pos))
+            
+            # Draw input box if active
+            if self.input_active:
+                input_surface = pygame.Surface((self.input_box.width, self.input_box.height), pygame.SRCALPHA)
+                input_surface.fill((50, 50, 50, 200))
+                surface.blit(input_surface, self.input_box)
+                
+                # Draw input text
+                if self.current_message:
+                    input_text = self.font.render(self.current_message, True, (255, 255, 255))
+                    surface.blit(input_text, (self.input_box.x + 5, self.input_box.y + 5))
+                
+                # Draw cursor
+                if self.cursor_visible:
+                    text_width = self.font.size(self.current_message)[0]
+                    cursor_x = self.input_box.x + 5 + text_width
+                    pygame.draw.line(surface, (255, 255, 255),
+                                  (cursor_x, self.input_box.y + 5),
+                                  (cursor_x, self.input_box.y + self.input_box.height - 5), 2)
+                
+                # Draw prompt
+                prompt = self.font.render("Type your message and press Enter", True, (200, 200, 200))
+                surface.blit(prompt, (self.input_box.x + 5, self.input_box.y - 25))
+            elif len(self.messages) > 0:
+                # Show hint when chat has messages but input is inactive
+                hint = self.font.render("Press T to chat", True, (200, 200, 200))
+                hint_rect = hint.get_rect(bottomleft=(20, HEIGHT - 10))
+                surface.blit(hint, hint_rect)

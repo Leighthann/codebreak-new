@@ -1,7 +1,9 @@
 import pygame
-
+import requests
+import asyncio
+import websockets
+import json
 from effects import GameEffects
-from enemy import Enemy
 
 # Handles player animations, movement, and actions.
 
@@ -11,12 +13,13 @@ import pygame
 class Player:
     def __init__(self, sprite_sheet, x, y, speed=5):
         # Position and movement
-        self.x = x
+        self.x = x                                  
         self.y = y
         self.speed = speed
         self.direction = "down"  # Default direction
         self.width = 48
         self.height = 48
+        self.game_ref = None 
         
         # Stats
         self.health = 100
@@ -30,6 +33,7 @@ class Player:
         self.is_dashing = False
         self.is_invincible = False
         self.is_moving = False  # Add movement state tracking
+        
         
         # Timers
         self.attack_start_time = 0
@@ -55,6 +59,14 @@ class Player:
             "energy_cores": 0,
             "data_shards": 0
         }
+        self.username = "Player1"  # Replace with a dynamic username input
+        self.server_url = "http://localhost:8000"
+        self.ws = None
+        self.connected = False
+
+        # DO NOT use asyncio.run() here as it creates a new event loop
+        # Instead, store the coroutines to be run later
+        self.pending_init = True
         
         # Equipment
         self.equipped_weapon = None
@@ -108,6 +120,255 @@ class Player:
         # Active effects
         self.active_effects = {}
 
+
+
+    def set_game_reference(self, game):
+        """Set a reference to the game instance"""
+        self.game_ref = game
+        # Add these methods to your Player class for authentication
+
+    async def register_user(self, username, password):
+        """Register a new user with the backend"""
+        try:
+            url = f"{self.server_url}/register/user"
+            data = {
+                "username": username,
+                "password": password
+            }
+            response = requests.post(url, json=data)
+        
+            if response.status_code == 200:
+                print(f"Successfully registered user: {username}")
+                self.username = username
+                return response.json()
+            else:
+                print(f"Failed to register user. Status code: {response.status_code}")
+                print(response.text)
+            return None
+        except Exception as e:
+            print(f"Error registering user: {e}")
+        return None
+
+    async def login(self, username, password):
+        """Login and get authentication token"""
+        try:
+            url = f"{self.server_url}/token"
+            data = {
+                "username": username,
+                "password": password
+            }
+            # Use form data for OAuth2 password flow
+            response = requests.post(url, data=data)
+        
+            if response.status_code == 200:
+                token_data = response.json()
+                self.auth_token = token_data["access_token"]
+                self.username = username
+                print(f"Successfully logged in as: {username}")
+                return token_data
+            else:
+                print(f"Failed to login. Status code: {response.status_code}")
+                print(response.text)
+            return None
+        except Exception as e:
+            print(f"Error logging in: {e}")
+        return None
+
+    async def connect_to_server_with_auth(self):
+        """Opens WebSocket connection with authentication token"""
+        try:
+            if not hasattr(self, 'auth_token'):
+                print("Not authenticated, connecting without token")
+                self.ws = await websockets.connect(f"ws://localhost:8000/ws/{self.username}")
+            else:
+                # Include token in the connection
+                self.ws = await websockets.connect(
+                    f"ws://localhost:8000/ws/{self.username}?token={self.auth_token}"
+                )
+            
+            self.connected = True
+            print(f"Connected to WebSocket as {self.username}")
+            
+            # Start background task to listen for server messages
+            self.listener_task = asyncio.create_task(self.listen_for_server_messages())
+        except Exception as e:
+            self.connected = False
+            print(f"Failed to connect to WebSocket: {e}")
+        try:
+            if not hasattr(self, 'auth_token'):
+                print("Not authenticated, connecting without token")
+                self.ws = await websockets.connect(f"ws://localhost:8000/ws/{self.username}")
+            else:
+                # Include token in the connection
+                self.ws = await websockets.connect(
+                    f"ws://localhost:8000/ws/{self.username}?token={self.auth_token}"
+                )
+        
+            self.connected = True
+            print(f"Connected to WebSocket as {self.username}")
+        
+            # Start background task to listen for server messages
+            self.listener_task = asyncio.create_task(self.listen_for_server_messages())
+        except Exception as e:
+            self.connected = False
+            print(f"Failed to connect to WebSocket: {e}")
+
+    async def end_game_session(self, session_id, score, enemies_defeated, waves_completed):
+        """End the current game session with stats"""
+        if not hasattr(self, 'auth_token'):
+            print("Not authenticated, cannot end game session")
+            return None    
+        try:
+            url = f"{self.server_url}/game-sessions/{session_id}"
+            headers = {"Authorization": f"Bearer {self.auth_token}"}
+            data = {
+                "score": score,
+                "enemies_defeated": enemies_defeated,
+                "waves_completed": waves_completed
+            }
+            response = requests.put(url, json=data, headers=headers)
+        
+            if response.status_code == 200:
+                print("Successfully ended game session")
+                return response.json()
+            else:
+                print(f"Failed to end game session. Status code: {response.status_code}")
+                print(response.text)
+                return None
+        except Exception as e:
+            print(f"Error ending game session: {e}")
+        return None
+
+    # Update the existing initialize_server_connection method to use authentication
+    async def initialize_server_connection(self, username=None, password=None):
+        """Initialize all server connections with optional authentication"""
+        try:
+            if username and password:
+                # First try to login
+                login_result = await self.login(username, password)
+                if not login_result:
+                    # If login fails, try to register
+                    register_result = await self.register_user(username, password)
+                    if register_result:
+                        # After registration, login again
+                        login_result = await self.login(username, password)
+        
+            # Connect to WebSocket with authentication if available
+            await self.connect_to_server_with_auth()
+        
+            # Send initial state
+            await self.send_update()
+        
+            # Mark initialization as complete
+            self.pending_init = False
+        except Exception as e:
+            print(f"Failed to initialize server connection: {e}")
+
+    
+    def register_player(self):
+        """Registers player with the FastAPI backend"""
+        try:
+            url = f"{self.server_url}/register/"
+            data = {
+                "username": self.username,
+                "health": self.health,
+                "x": self.x,
+                "y": self.y
+            }
+            response = requests.post(url, params=data)
+            if response.status_code == 200:
+                print(f"Successfully registered player: {self.username}")
+                print(response.json())
+            else:
+                print(f"Failed to register player. Status code: {response.status_code}")
+                print(response.text)  # Print response text for debugging
+        except Exception as e:
+            print(f"Error registering player: {e}")
+            return None
+        return response.json()  # Return the response
+
+    async def connect_to_server(self):
+        """Opens WebSocket connection for real-time interactions"""
+        try:
+            self.ws = await websockets.connect(f"ws://localhost:8000/ws/{self.username}")
+            self.connected = True
+            print(f"Connected to WebSocket as {self.username}")
+            
+            # Start background task to listen for server messages
+            # Store the task so it's not garbage collected
+            self.listener_task = asyncio.create_task(self.listen_for_server_messages())
+        except Exception as e:
+            self.connected = False
+            print(f"Failed to connect to WebSocket: {e}")
+
+    async def listen_for_server_messages(self):
+        """Listen for incoming messages from the server"""
+        if not self.connected or not self.ws:
+            print("WebSocket not connected, cannot listen for messages")
+            return
+            
+        try:
+            while True:
+                message = await self.ws.recv()
+                data = json.loads(message)
+                print(f"Received from server: {data}")
+                
+                # Handle different message types
+                if "event" in data:
+                    await self.handle_server_event(data)
+        except websockets.exceptions.ConnectionClosed:
+            print("WebSocket connection closed")
+            self.connected = False
+        except Exception as e:
+            print(f"Error in WebSocket listener: {e}")
+            self.connected = False
+
+    async def handle_server_event(self, data):
+        """Handle different types of server events"""
+        event_type = data.get("event")
+    
+        if event_type == "player_joined":
+            joined_username = data.get('username')
+            print(f"Player joined: {joined_username}")
+            if joined_username != self.username:  # Don't show for self
+                if hasattr(self, "game_ref") and hasattr(self.game_ref, "chat_system"):
+                    if self.game_ref and hasattr(self.game_ref, "chat_system"):
+                        self.game_ref.chat_system.add_message("", f"{joined_username} joined the game", system_message=True)
+    
+        elif event_type == "player_left":
+            left_username = data.get("username", "Unknown")
+            print(f"Player left: {left_username}")
+        if hasattr(self, "game_ref") and hasattr(self.game_ref, "chat_system"):
+            if self.game_ref and hasattr(self.game_ref, "chat_system") and self.game_ref.chat_system:
+                self.game_ref.chat_system.add_message("", f"{left_username} left the game", system_message=True)
+    
+        elif event_type == "item_drop":
+            print(f"Item dropped at x:{data.get('x')}, y:{data.get('y')}")
+    
+        elif event_type == "server_message":
+            print(f"Server message: {data.get('message')}")
+    
+        elif event_type == "update":
+            print(f"{data['player']['username']} moved to {data['player']['position']}")
+    
+        elif event_type == "chat_message":
+            sender = data.get("username", "Unknown")
+        message = data.get("message", "")
+        if hasattr(self, "game_ref") and hasattr(self.game_ref, "chat_system"):
+            if self.game_ref and hasattr(self.game_ref, "chat_system") and self.game_ref.chat_system:
+                self.game_ref.chat_system.add_message(sender, message)
+        print(f"Chat: {sender}: {message}")
+    
+    async def send_update(self):
+        """Sends updated player data to the server"""
+        if self.ws:
+            update_data = {
+                "location": {"x": self.x, "y": self.y},
+                "health": self.health,
+                "inventory": self.inventory
+            }
+            await self.ws.send(json.dumps(update_data))
+
     def load_animations(self, sheet):
         """Load all animation frames from sprite sheet."""
         try:
@@ -156,7 +417,7 @@ class Player:
             self.sprite_height
         ))
 
-    def move(self, keys, world_generator):
+    async def move(self, keys, world_generator):
         """Handle player movement based on key input."""
         moving = False
         
@@ -206,34 +467,41 @@ class Player:
                     self.y = original_y
                     moving = False
                     return moving
+        
+        # Only if the player actually moved, send an update
+        if moving:
+            await self.send_update()
             
         return moving
 
-    def animate(self, moving, keys, enemies):
+    async def animate(self, moving, keys, enemies):
         """Update player animation and handle actions."""
         current_time = pygame.time.get_ticks()
+        action_taken = False  # Initialize action_taken
         
         # Update invincibility
         if self.is_invincible and current_time - self.invincibility_timer >= self.invincibility_duration:
             self.is_invincible = False
         
         # Handle attack input
-        if keys[pygame.K_SPACE] and not self.attacking:
+        if keys[pygame.K_SPACE]:
             self.attacking = True
+            action_taken = True  # Mark action as taken
             self.attack_start_time = current_time
             self.effects.play_attack_sound()
             
             # Apply weapon damage if equipped
             self.damage = self.use_equipped_item()
         
-        # Handle projectile input
         if keys[pygame.K_f] and current_time - self.last_projectile_time >= self.projectile_cooldown:
-            self.fire_projectile()
+            await self.fire_projectile()
             self.last_projectile_time = current_time
+            action_taken = True  # Mark action as taken
             
         # Handle tool input (e.g., shield)
         if keys[pygame.K_e] and self.equipped_tool:
-            self.use_tool()
+            await self.use_tool()
+            action_taken = True  # Mark action as taken
         
         # Choose sprite based on state
         if self.attacking:
@@ -274,17 +542,22 @@ class Player:
                 self.sprite = self.walk_down[0]
         
         # Update projectiles
-        self.update_projectiles(enemies)
+        await self.update_projectiles(enemies)
+
+        # Send state update if any action was taken
+        if action_taken:
+            await self.send_update()
         
         return self.sprite
-
-    def fire_projectile(self):
+    
+       
+    async def fire_projectile(self):
         """Create a new projectile in the current direction."""
-        projectile_cost = 8.0  # Energy cost for firing projectile
+        projectile_cost = 10.0  # Energy cost for firing projectile
         
         # Check if player has enough energy
         if self.energy < projectile_cost:
-            return
+            return False
         
         # Consume energy
         self.energy = max(0, self.energy - projectile_cost)
@@ -305,7 +578,12 @@ class Player:
         # Play sound
         self.effects.play_hit_sound()
 
-    def update_projectiles(self, enemies):
+        # Send update to server
+        await self.send_update()
+
+        return True  # Indicate projectile was fired    
+
+    async def update_projectiles(self, enemies):
         """Update projectile positions and check for collisions."""
         # Get screen dimensions
         screen = pygame.display.get_surface()
@@ -313,6 +591,7 @@ class Player:
         screen_height = screen.get_height()
         
         # Update each projectile
+        projectile_hit = False  # Initialize projectile_hit
         for projectile in self.projectiles[:]:
             # Move projectile
             if projectile["dir"] == "right":
@@ -339,9 +618,14 @@ class Player:
                     # Remove projectile
                     if projectile in self.projectiles:
                         self.projectiles.remove(projectile)
+                    projectile_hit = True  # Set projectile_hit to True
                     break
+        
+        # If a projectile hit something, we'll update the server
+        if projectile_hit:
+            await self.send_update()
 
-    def decrease_health(self, amount):
+    async def decrease_health(self, amount):
         """Decrease player health if not invincible."""
         if not self.is_invincible:
             # Apply shield if available
@@ -358,6 +642,22 @@ class Player:
                 # Become invincible briefly
                 self.is_invincible = True
                 self.invincibility_timer = pygame.time.get_ticks()
+
+                 # Notify server of damage taken
+                if self.connected and self.ws:
+                    try:
+                        damage_data = {
+                            "action": "damage_taken",
+                            "amount": amount,
+                            "health": self.health
+                        }
+                        await self.ws.send(json.dumps(damage_data))
+                    except Exception as e:
+                        print(f"Failed to send damage data: {e}")
+                        self.connected = False
+                
+                # Send general update
+                await self.send_update()
                 
                 return True  # Damage was dealt
                 
@@ -374,7 +674,7 @@ class Player:
                 return False
         return True
     
-    def craft_item(self, item_name):
+    async def craft_item(self, item_name):
         """Attempt to craft an item using resources."""
         print(f"DEBUG: Player.craft_item called for {item_name}")
         
@@ -411,10 +711,11 @@ class Player:
         # This allows all items to be used with the E key
         self.equipped_tool = crafted_item
         print(f"DEBUG: Auto-equipped {item_name} as tool")
-            
+
+        await self.send_update()
         return True
 
-    def equip_item(self, item_index):
+    async def equip_item(self, item_index):
         """Equip a crafted item."""
         if 0 <= item_index < len(self.crafted_items):
             item = self.crafted_items[item_index]
@@ -422,6 +723,20 @@ class Player:
                 self.equipped_weapon = item
             else:
                 self.equipped_tool = item
+             # Notify server of equipment change
+            if self.connected and self.ws:
+                try:
+                    equip_data = {
+                        "action": "equip_item",
+                        "item_name": item["name"],
+                        "item_type": "weapon" if item["name"].endswith(("sword", "blade")) else "tool"
+                    }
+                    await self.ws.send(json.dumps(equip_data))
+                except Exception as e:
+                    print(f"Failed to send equip data: {e}")
+                    self.connected = False
+            
+            await self.send_update()
                 
     def use_equipped_item(self):
         """Use the currently equipped item."""
@@ -441,13 +756,13 @@ class Player:
             
         return 10  # Base damage if no weapon equipped
 
-    def use_tool(self):
+    async def use_tool(self):
         """Use the currently equipped tool."""
         print(f"DEBUG: Player.use_tool called")
         
         if not self.equipped_tool:
             print("DEBUG: No tool equipped")
-            return
+            return False
         
         # Define energy costs for tools
         tool_costs = {
@@ -462,7 +777,7 @@ class Player:
         # Check if player has enough energy
         if self.energy < energy_cost:
             print("DEBUG: Not enough energy to use tool")
-            return
+            return False
         
         # Consume energy
         self.energy = max(0, self.energy - energy_cost)
@@ -519,6 +834,25 @@ class Player:
                 self.crafted_items.remove(self.equipped_tool)
                 self.equipped_tool = None
                 print("DEBUG: Tool broke and was removed")
+            
+        # Notify server of tool use
+        if self.connected and self.ws:
+            try:
+                tool_data = {
+                    "action": "use_tool",
+                    "tool_name": self.equipped_tool["name"] if self.equipped_tool else "none",
+                    "energy": self.energy,
+                    "shield": self.shield
+                }
+                await self.ws.send(json.dumps(tool_data))
+            except Exception as e:
+                print(f"Failed to send tool use data: {e}")
+                self.connected = False
+        
+        # Send general update
+        await self.send_update()
+        
+        return True  # Indicate tool was used
 
     def update_energy(self, dt):
         """Update player energy regeneration."""
@@ -536,10 +870,12 @@ class Player:
         # Apply regeneration
         self.energy = min(self.max_energy, self.energy + regen_rate * dt)
 
-    def collect_energy_core(self, amount):
+    async def collect_energy_core(self, amount):
         """Handle energy core collection."""
         base_energy_restore = 20
         bonus_energy = amount * 5  # Scale with core value
         
         self.energy = min(self.max_energy, self.energy + base_energy_restore + bonus_energy)
 
+        # Send update to server
+        await self.send_update()
