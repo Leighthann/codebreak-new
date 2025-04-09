@@ -408,7 +408,7 @@ class Menu:
 
     def play(self):
         print("Starting the game...")
-        self.game.transition_to("play")
+        self.game.transition_to("gameplay")
 
     def show_leaderboard(self):
         print("Showing leaderboard...")
@@ -507,6 +507,15 @@ class Game:
         
         # Game effects
         self.effects = GameEffects()
+        
+        # Add enemy tasks tracking
+        self.enemy_update_tasks = []
+        
+        # Initialize wave variables
+        self.enemies_to_spawn = 0
+        self.spawn_timer = 0
+        self.next_wave_timer = 0
+        self.wave_number = 0
 
     def load_fonts(self):
         """Load fonts for the game."""
@@ -867,12 +876,16 @@ class Game:
 
     def update_enemies(self, dt):
         """Update all enemy entities."""
+        # Clear completed tasks
+        self.enemy_update_tasks = [task for task in self.enemy_update_tasks if not task.done()]
+        
         # Use a copy of the list for safe iteration
         for enemy in self.enemies[:]:
             if enemy.active:
                 # Update enemy logic
                 if self.player:
-                    enemy.update(self.player)
+                    task = asyncio.create_task(enemy.update(self.player))
+                    self.enemy_update_tasks.append(task)
                 
                 # Check if enemy is defeated
                 if enemy.health <= 0:
@@ -940,11 +953,10 @@ class Game:
         print(f"Starting wave {self.wave_number}")  # Debug print
         
         # Calculate enemies based on wave and difficulty
-        base_enemies = 3 + (self.wave_number *2)  # Increase this value to spawn more enemies per wave
+        base_enemies = 3 + (self.wave_number * 2)  # Increase this value to spawn more enemies per wave
         difficulty_mult = {"Easy": 0.7, "Normal": 1.0, "Hard": 2.0}
         difficulty_factor = difficulty_mult.get(self.settings["difficulty"], 1.0)
         
-        self.enemies_to_spawn = int(base_enemies * difficulty_factor)  # Total enemies to spawn
         self.enemies_to_spawn = max(3, int(base_enemies * difficulty_factor))
         print(f"Spawning {self.enemies_to_spawn} enemies")  # Debug print
         self.spawn_timer = 0
@@ -966,8 +978,7 @@ class Game:
         initial_spawn = min(3, self.enemies_to_spawn)
         for _ in range(initial_spawn):
             self.spawn_wave_enemy()
-            self.enemies_to_spawn -= 1
-
+        
         print(f"Initial spawn complete. {self.enemies_to_spawn} enemies remaining")  # Debug print
 
     def spawn_wave_enemy(self):
@@ -975,21 +986,21 @@ class Game:
         if self.enemies_to_spawn <= 0:
             return
         
-        # Always spawn at screen edge
-         # Determine spawn position at screen edge
-        margin = 100  # Increased margin to prevent instant collisions
+        # Always spawn at screen edge with proper margins
+        margin = 50  # Reduced margin to ensure enemies are visible
         side = random.randint(0, 3)  # 0: top, 1: right, 2: bottom, 3: left
+        
         if side == 0:  # Top
             x = random.randint(margin, WIDTH - margin)
-            y = -margin
+            y = margin  # Spawn just at the top edge
         elif side == 1:  # Right
-            x = WIDTH + margin
+            x = WIDTH - margin  # Spawn just at the right edge
             y = random.randint(margin, HEIGHT - margin)
         elif side == 2:  # Bottom
             x = random.randint(margin, WIDTH - margin)
-            y = HEIGHT + margin
+            y = HEIGHT - margin  # Spawn just at the bottom edge
         else:  # Left
-            x = -margin
+            x = margin  # Spawn just at the left edge
             y = random.randint(margin, HEIGHT - margin)
         
         # Create enemy
@@ -1001,6 +1012,16 @@ class Game:
         enemy.health = int(50 * wave_factor)
         enemy.max_health = enemy.health
         enemy.speed = int(2 * (1 + (self.wave_number - 1) * 0.05))
+        
+        # Initialize direction based on spawn position
+        if side == 0:
+            enemy.direction = "down"
+        elif side == 1:
+            enemy.direction = "left"
+        elif side == 2:
+            enemy.direction = "up"
+        else:
+            enemy.direction = "right"
         
         self.enemies.append(enemy)
         self.enemies_to_spawn -= 1

@@ -1,170 +1,174 @@
 """
-Modified version of db.py with TLS configuration fix for MongoDB Atlas
+Updated db.py - PostgreSQL with Async SQLAlchemy
 """
 
-from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, Field
-from typing import Dict, List, Optional
-from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import Column, Integer, String, JSON, DateTime, func
 import os
 from dotenv import load_dotenv
-import certifi  # Add this import for CA certificates
 
 # Load environment variables
 load_dotenv()
 
-# MongoDB connection with TLS/SSL configuration
-MONGO_URL = os.getenv("MONGO_URL", "mongodb+srv://CodebreakAdmin:codebreak123@codebreak.hqnfeao.mongodb.net/?retryWrites=true&w=majority&appName=Codebreak")
-db_client = AsyncIOMotorClient(
-    MONGO_URL,
-    tls=True,
-    tlsCAFile=certifi.where(),  # Use the Mozilla CA certificate bundle
-    serverSelectionTimeoutMS=5000  # Reduce timeout for faster feedback
-)
-db = db_client.get_database("codebreak_db")  # Use actual database name
-print("MongoDB client initialized successfully")
+# PostgreSQL connection URL from .env file
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:password@localhost:5432/codebreak_db")
 
-# Test MongoDB connection
-async def test_mongo_connection():
-    try:
-        # Attempt to list collections to verify the connection
-        collections = await db.list_collection_names()
-        print("MongoDB connection successful. Collections:", collections)
-    except Exception as e:
-        print("MongoDB connection failed:", e)
+# Create async database engine
+engine = create_async_engine(DATABASE_URL, echo=True)
 
-# Ensure this is called in an async context
-if __name__ == "__main__":
-    import asyncio
+# Create session factory
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-    async def main():
-        await test_mongo_connection()
-    asyncio.run(main())
+async_session = async_sessionmaker(engine, expire_on_commit=False)
 
-# Collections
-db = db_client["codebreak_db"]
-players_collection = db["players"]
-leaderboard_collection = db["leaderboard"]
-game_sessions_collection = db["game_sessions"]
-items_collection = db["items"]
+# Base class for defining models
+Base = declarative_base()
 
-# Pydantic Models for data validation
-class PlayerModel(BaseModel):
-    username: str
-    health: int = 100
-    x: int = 0
-    y: int = 0
-    score: int = 0
-    inventory: Optional[Dict] = None
-    created_at: datetime = Field(default_factory=datetime.now)
-    last_login: datetime = Field(default_factory=datetime.now)
+async def get_db():
+    """Dependency to get a database session for FastAPI routes"""
+    async with async_session() as session:
+        yield session
 
-class LeaderboardEntry(BaseModel):
-    username: str
-    score: int
-    wave_reached: int = 0
-    survival_time: float = 0.0
-    date: datetime = Field(default_factory=datetime.now)
+# Database Models
+class Player(Base):
+    __tablename__ = "players"
 
-class GameSession(BaseModel):
-    session_id: str
-    username: str
-    start_time: datetime = Field(default_factory=datetime.now)
-    end_time: Optional[datetime] = None
-    score: int = 0
-    enemies_defeated: int = 0
-    waves_completed: int = 0
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, nullable=False)
+    health = Column(Integer, default=100)
+    x = Column(Integer, default=0)
+    y = Column(Integer, default=0)
+    score = Column(Integer, default=0)
+    inventory = Column(JSON, default={})
+    created_at = Column(DateTime, server_default=func.now())
+    last_login = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-class Item(BaseModel):
-    item_id: str
-    type: str  # "resource", "weapon", "tool"
-    name: str
-    x: int
-    y: int
-    value: int = 1
-    spawned_at: datetime = Field(default_factory=datetime.now)
+class LeaderboardEntry(Base):
+    __tablename__ = "leaderboard"
 
-# Database operations
-async def get_player(username: str):
-    player = await players_collection.find_one({"username": username})
-    return player
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, nullable=False)
+    score = Column(Integer, nullable=False)
+    date = Column(DateTime, server_default=func.now())
 
-async def create_or_update_player(player_data: dict):
-    result = await players_collection.update_one(
-        {"username": player_data["username"]},
-        {"$set": player_data},
-        upsert=True
-    )
-    return result
+class GameSession(Base):
+    __tablename__ = "game_sessions"
 
-async def update_player_position(username: str, x: int, y: int):
-    result = await players_collection.update_one(
-        {"username": username},
-        {"$set": {"x": x, "y": y, "last_updated": datetime.now()}}
-    )
-    return result
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, nullable=False)
+    start_time = Column(DateTime, server_default=func.now())
+    end_time = Column(DateTime, nullable=True)
+    score = Column(Integer, default=0)
+    enemies_defeated = Column(Integer, default=0)
+    waves_completed = Column(Integer, default=0)
 
-async def add_to_leaderboard(entry: dict):
-    result = await leaderboard_collection.insert_one(entry)
-    return result
+class Item(Base):
+    __tablename__ = "items"
 
-async def get_top_leaderboard(limit: int = 10):
-    cursor = leaderboard_collection.find().sort("score", -1).limit(limit)
-    return await cursor.to_list(limit)
+    id = Column(Integer, primary_key=True, index=True)
+    type = Column(String, nullable=False)  # "resource", "weapon", "tool"
+    name = Column(String, nullable=False)
+    x = Column(Integer, nullable=False)
+    y = Column(Integer, nullable=False)
+    value = Column(Integer, default=1)
+    spawned_at = Column(DateTime, server_default=func.now())
 
-async def record_game_session(session: dict):
-    result = await game_sessions_collection.insert_one(session)
-    return result
+# Create tables (if running without Alembic migrations)
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-async def spawn_item(item: dict):
-    result = await items_collection.insert_one(item)
-    return result
+# Database Operations
+async def get_player(username: str, db: AsyncSession):
+    """Retrieve player details by username"""
+    from sqlalchemy.future import select
 
-async def collect_item(item_id: str, username: str):
-    # First get the item
-    item = await items_collection.find_one({"item_id": item_id})
+    stmt = select(Player).where(Player.username == username)
+    result = await db.execute(stmt)
+    return result.fetchone()
+
+async def create_or_update_player(player_data: dict, db: AsyncSession):
+    """Create or update player details"""
+    query = """
+        INSERT INTO players (username, health, x, y, score, inventory, created_at, last_login)
+        VALUES (:username, :health, :x, :y, :score, :inventory, NOW(), NOW())
+        ON CONFLICT (username) DO UPDATE 
+        SET health = EXCLUDED.health, x = EXCLUDED.x, y = EXCLUDED.y, score = EXCLUDED.score, inventory = EXCLUDED.inventory, last_login = NOW();
+    """
+    from sqlalchemy.sql import text
+    await db.execute(text(query), player_data)
+    await db.commit()
+
+async def update_player_position(username: str, x: int, y: int, db: AsyncSession):
+    """Update player position"""
+    query = "UPDATE players SET x = :x, y = :y, last_login = NOW() WHERE username = :username"
+    from sqlalchemy.sql import text
+    await db.execute(text(query), {"username": username, "x": x, "y": y})
+    await db.commit()
+
+async def add_to_leaderboard(entry: dict, db: AsyncSession):
+    """Insert a new leaderboard entry"""
+    query = "INSERT INTO leaderboard (username, score, date) VALUES (:username, :score, NOW())"
+    from sqlalchemy.sql import text
+    await db.execute(text(query), entry)
+    await db.commit()
+
+async def get_top_leaderboard(limit: int, db: AsyncSession):
+    """Retrieve top leaderboard scores"""
+    from sqlalchemy.sql import text
+    query = text("SELECT * FROM leaderboard ORDER BY score DESC LIMIT :limit")
+    result = await db.execute(query, {"limit": limit})
+    return result.fetchall()
+
+async def record_game_session(session_data: dict, db: AsyncSession):
+    """Insert a new game session record"""
+    query = """
+        INSERT INTO game_sessions (username, start_time, end_time, score, enemies_defeated, waves_completed)
+        VALUES (:username, :start_time, :end_time, :score, :enemies_defeated, :waves_completed)
+    """
+    from sqlalchemy.sql import text
+    await db.execute(text(query), session_data)
+    await db.commit()
+
+async def spawn_item(item_data: dict, db: AsyncSession):
+    """Spawn a new item in the game world"""
+    query = """
+        INSERT INTO items (type, name, x, y, value, spawned_at)
+        VALUES (:type, :name, :x, :y, :value, NOW())
+    """
+    from sqlalchemy.sql import text
+    await db.execute(text(query), item_data)
+    await db.commit()
+
+async def collect_item(item_id: int, username: str, db: AsyncSession):
+    """Collect an item and update the player's inventory"""
+    # Retrieve the item
+    query = "SELECT * FROM items WHERE id = :item_id"
+    from sqlalchemy.sql import text
+    result = await db.execute(text(query), {"item_id": item_id})
+    item = result.fetchone()
+
     if not item:
         return None
     
-    # Remove the item from the collection
-    await items_collection.delete_one({"item_id": item_id})
-    
+    # Remove the item from the game world
+    delete_query = "DELETE FROM items WHERE id = :item_id"
+    from sqlalchemy.sql import text
+    await db.execute(text(delete_query), {"item_id": item_id})
+
     # Update player inventory
-    await players_collection.update_one(
-        {"username": username},
-        {"$inc": {f"inventory.{item['type']}": item['value']}}
-    )
-    
+    update_query = """
+        UPDATE players 
+        SET inventory = jsonb_set(
+            inventory, 
+            '{' || :type || '}', 
+            (COALESCE(inventory->>:type, '0')::int + :value)::text::jsonb
+        ) 
+        WHERE username = :username
+    """
+    from sqlalchemy.sql import text
+    await db.execute(text(update_query), {"type": item.type, "value": item.value, "username": username})
+    await db.commit()
+
     return item
-
-# Create database indexes for better performance
-async def create_indexes():
-    if not await test_mongo_connection():
-        print("Skipping index creation due to connection failure")
-        return False
-    try:
-        await players_collection.create_index("username", unique=True)
-        await leaderboard_collection.create_index([("score", -1)])
-        await game_sessions_collection.create_index("username")
-        await items_collection.create_index("item_id", unique=True)
-        await items_collection.create_index([("spawned_at", 1)], expireAfterSeconds=3600)  # TTL index
-        print("Basic indexes created successfully")
-        print("Database indexes created successfully")
-    except Exception as e:
-        print(f"Error creating indexes: {e}")
-        # You can re-raise or handle the exception as needed
-
-
-# async def create_indexes():
-#         if not await test_mongo_connection():
-#             print("Skipping index creation due to connection failure")
-#             return False
-#         try:
-#             # Create basic indexes
-#             await db["players"].create_index("username", unique=True)
-#             await db["users"].create_index("username", unique=True)
-#             print("Basic indexes created successfully")
-#             return True
-#         except Exception as e:
-#             print(f"Error creating indexes: {e}")
-#             return False

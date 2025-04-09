@@ -18,6 +18,7 @@ class Enemy:
         self.chase_range = 300
         self.attack_range = 40
         self.state = "idle"
+        self.direction = "down"  # Initialize direction attribute
         
         # Sprite and animation
         self.sprite_width = 48
@@ -25,25 +26,47 @@ class Enemy:
         self.frame_index = 0
         self.animation_speed = 10
         self.frame_counter = 0
-        self.sprite = None
-
+        
+        # Initialize sprite variables
+        self.walk_right = []
+        self.walk_left = []
+        self.walk_up = []
+        self.walk_down = []
+        self.idle_frames = []
+        self.attack_frames = []
+        
         self.server_url = server_url
-        self.active = False  # Initialize the 'active' attribute
+        self.active = True  # Set active to True by default
         self.effects = GameEffects()
         self.width = 48  # Set default width for the enemy
         self.height = 48  # Set default height for the enemy
         
-        if sprite_sheet.get_width() >= self.sprite_width * 4 and sprite_sheet.get_height() >= self.sprite_height * 6:
-            # Full spritesheet format (4x6)
-            self.walk_right = [self.get_frame(sprite_sheet, i, 0) for i in range(4)]
-            self.walk_left = [self.get_frame(sprite_sheet, i, 1) for i in range(4)]
-            self.walk_up = [self.get_frame(sprite_sheet, i, 2) for i in range(4)]
-            self.walk_down = [self.get_frame(sprite_sheet, i, 3) for i in range(4)]
-            self.idle_frames = [self.get_frame(sprite_sheet, i, 4) for i in range(4)]
-            self.attack_frames = [self.get_frame(sprite_sheet, i, 5) for i in range(4)]
+        # Load sprites
+        if sprite_sheet and isinstance(sprite_sheet, pygame.Surface):
+            if sprite_sheet.get_width() >= self.sprite_width * 4 and sprite_sheet.get_height() >= self.sprite_height * 6:
+                # Full spritesheet format (4x6)
+                self.walk_right = [self.get_frame(sprite_sheet, i, 0) for i in range(4)]
+                self.walk_left = [self.get_frame(sprite_sheet, i, 1) for i in range(4)]
+                self.walk_up = [self.get_frame(sprite_sheet, i, 2) for i in range(4)]
+                self.walk_down = [self.get_frame(sprite_sheet, i, 3) for i in range(4)]
+                self.idle_frames = [self.get_frame(sprite_sheet, i, 4) for i in range(4)]
+                self.attack_frames = [self.get_frame(sprite_sheet, i, 5) for i in range(4)]
+            else:
+                # Create a fallback sprite
+                fallback = pygame.Surface((48, 48), pygame.SRCALPHA)
+                fallback.fill((255, 0, 0))  # Red color for visibility
+                pygame.draw.rect(fallback, (255, 255, 255), fallback.get_rect(), 2)  # White border
+                self.walk_right = [fallback] * 4
+                self.walk_left = [fallback] * 4
+                self.walk_up = [fallback] * 4
+                self.walk_down = [fallback] * 4
+                self.idle_frames = [fallback] * 4
+                self.attack_frames = [fallback] * 4
         else:
+            # Create a fallback sprite if no sprite sheet provided
             fallback = pygame.Surface((48, 48), pygame.SRCALPHA)
-            fallback.fill((255, 0, 0))
+            fallback.fill((255, 0, 0))  # Red color for visibility
+            pygame.draw.rect(fallback, (255, 255, 255), fallback.get_rect(), 2)  # White border
             self.walk_right = [fallback] * 4
             self.walk_left = [fallback] * 4
             self.walk_up = [fallback] * 4
@@ -51,8 +74,11 @@ class Enemy:
             self.idle_frames = [fallback] * 4
             self.attack_frames = [fallback] * 4
         
-        self.sprite = self.idle_frames[0]
-        asyncio.create_task(self.listen_for_updates())
+        # Set initial sprite
+        self.sprite = self.idle_frames[0] if self.idle_frames else None
+        
+        # Don't start websocket connection immediately
+        self.ws = None
 
     def get_frame(self, sheet, frame, row):
         return sheet.subsurface(pygame.Rect(frame * 48, row * 48, 48, 48))
@@ -72,25 +98,46 @@ class Enemy:
             self.health = min(self.max_health, self.health + 10)
 
     async def update(self, player):
-        if not player or not self.active:
+        """Update enemy state and animation."""
+        if not player or not self.active or not self.sprite:
             return
-        #distance = ((self.x - player.x) ** 2 + (self.y - player.y) ** 2) ** 0.5
+
+        # Calculate distance to player
         dx = player.x - self.x
         dy = player.y - self.y
         distance = math.sqrt(dx*dx + dy*dy)
+
+        # Update state based on distance
         if distance < self.attack_range:
             self.state = "attack"
             await self.attack_player(player)
         elif distance < self.chase_range:
             self.state = "chase"
+            # Use the chase_player method to update position
             self.chase_player(player)
-            if distance > 0:
-                dx = dx / distance * self.speed
-                dy = dy / distance * self.speed
-                self.x += dx
-                self.y += dy
         else:
             self.state = "idle"
+
+        # Update animation
+        self.frame_counter += 1
+        if self.frame_counter >= self.animation_speed:
+            self.frame_counter = 0
+            self.frame_index = (self.frame_index + 1) % 4
+
+        # Set sprite based on state and direction
+        if self.state == "attack":
+            self.sprite = self.attack_frames[self.frame_index]
+        elif self.state == "chase":
+            if self.direction == "right":
+                self.sprite = self.walk_right[self.frame_index]
+            elif self.direction == "left":
+                self.sprite = self.walk_left[self.frame_index]
+            elif self.direction == "up":
+                self.sprite = self.walk_up[self.frame_index]
+            else:  # down
+                self.sprite = self.walk_down[self.frame_index]
+        else:  # idle
+            self.sprite = self.idle_frames[self.frame_index]
 
     def chase_player(self, player):
         dx = player.x - self.x
@@ -100,6 +147,19 @@ class Enemy:
         dy = dy / distance * self.speed
         self.x += dx
         self.y += dy
+        
+        # Update direction for animation
+        if abs(dx) > abs(dy):
+            if dx > 0:
+                self.direction = "right"
+            else:
+                self.direction = "left"
+        else:
+            if dy > 0:
+                self.direction = "down"
+            else:
+                self.direction = "up"
+                
         asyncio.create_task(self.sync_enemy_state())
 
     async def sync_enemy_state(self):
