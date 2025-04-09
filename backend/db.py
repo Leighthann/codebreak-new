@@ -1,19 +1,48 @@
+"""
+Modified version of db.py with TLS configuration fix for MongoDB Atlas
+"""
+
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 from typing import Dict, List, Optional
 from datetime import datetime
 import os
 from dotenv import load_dotenv
+import certifi  # Add this import for CA certificates
 
 # Load environment variables
 load_dotenv()
 
-# MongoDB connection (use environment variables for production)
-MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
-client = AsyncIOMotorClient(MONGO_URL)
-db = client["codebreak_db"]
+# MongoDB connection with TLS/SSL configuration
+MONGO_URL = os.getenv("MONGO_URL", "mongodb+srv://CodebreakAdmin:codebreak123@codebreak.hqnfeao.mongodb.net/?retryWrites=true&w=majority&appName=Codebreak")
+db_client = AsyncIOMotorClient(
+    MONGO_URL,
+    tls=True,
+    tlsCAFile=certifi.where(),  # Use the Mozilla CA certificate bundle
+    serverSelectionTimeoutMS=5000  # Reduce timeout for faster feedback
+)
+db = db_client.get_database("codebreak_db")  # Use actual database name
+print("MongoDB client initialized successfully")
+
+# Test MongoDB connection
+async def test_mongo_connection():
+    try:
+        # Attempt to list collections to verify the connection
+        collections = await db.list_collection_names()
+        print("MongoDB connection successful. Collections:", collections)
+    except Exception as e:
+        print("MongoDB connection failed:", e)
+
+# Ensure this is called in an async context
+if __name__ == "__main__":
+    import asyncio
+
+    async def main():
+        await test_mongo_connection()
+    asyncio.run(main())
 
 # Collections
+db = db_client["codebreak_db"]
 players_collection = db["players"]
 leaderboard_collection = db["leaderboard"]
 game_sessions_collection = db["game_sessions"]
@@ -110,12 +139,32 @@ async def collect_item(item_id: str, username: str):
 
 # Create database indexes for better performance
 async def create_indexes():
-    await players_collection.create_index("username", unique=True)
-    await leaderboard_collection.create_index([("score", -1)])
-    await game_sessions_collection.create_index("username")
-    await items_collection.create_index("item_id", unique=True)
-    await items_collection.create_index([("spawned_at", 1)], expireAfterSeconds=3600)  # TTL index
+    if not await test_mongo_connection():
+        print("Skipping index creation due to connection failure")
+        return False
+    try:
+        await players_collection.create_index("username", unique=True)
+        await leaderboard_collection.create_index([("score", -1)])
+        await game_sessions_collection.create_index("username")
+        await items_collection.create_index("item_id", unique=True)
+        await items_collection.create_index([("spawned_at", 1)], expireAfterSeconds=3600)  # TTL index
+        print("Basic indexes created successfully")
+        print("Database indexes created successfully")
+    except Exception as e:
+        print(f"Error creating indexes: {e}")
+        # You can re-raise or handle the exception as needed
 
-# Example function
-async def get_user(username):
-    return await db.users.find_one({"username": username})
+
+# async def create_indexes():
+#         if not await test_mongo_connection():
+#             print("Skipping index creation due to connection failure")
+#             return False
+#         try:
+#             # Create basic indexes
+#             await db["players"].create_index("username", unique=True)
+#             await db["users"].create_index("username", unique=True)
+#             print("Basic indexes created successfully")
+#             return True
+#         except Exception as e:
+#             print(f"Error creating indexes: {e}")
+#             return False

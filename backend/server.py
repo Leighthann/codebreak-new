@@ -6,6 +6,7 @@ from typing import List, Dict, Optional
 import asyncio
 import json
 import uuid
+import pymongo
 from datetime import datetime, timedelta
 import jwt  # Import the jwt module for token decoding
 
@@ -16,17 +17,35 @@ ALGORITHM = "HS256"
 
 # Import database models and functions
 from backend.db import (
-    PlayerModel, LeaderboardEntry, GameSession, Item,
+    PlayerModel, LeaderboardEntry, GameSession, Item, db,
     get_player, create_or_update_player, update_player_position,
     add_to_leaderboard, get_top_leaderboard, record_game_session,
-    spawn_item, collect_item, create_indexes, db
+    spawn_item, collect_item, create_indexes, test_mongo_connection
 )
 
 # Import authentication
 from backend.auth import (
-    Token, UserInDB, get_password_hash, authenticate_user, 
+    Token, UserInDB, get_password_hash, 
     create_access_token, get_current_user, ACCESS_TOKEN_EXPIRE_MINUTES
 )
+
+from passlib.context import CryptContext
+
+# Initialize password hashing context
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a plain password against a hashed password."""
+    return pwd_context.verify(plain_password, hashed_password)
+
+async def authenticate_user(username: str, password: str, db) -> Optional[UserInDB]:
+    """Authenticate a user by verifying their username and password."""
+    user = await db["users"].find_one({"username": username})
+    if not user:
+        return None  # Return None instead of False
+    if not verify_password(password, user["hashed_password"]):
+        return None  # Return None instead of False
+    return UserInDB(**user)
 
 app = FastAPI(title="CodeBreak Game API")
 
@@ -87,29 +106,7 @@ manager = ConnectionManager()
 async def startup_event():
     # Create database indexes
     await create_indexes()
-
-# # Authentication routes
-# @app.post("/register")
-# async def register_user(username: str, password: str):
-#     """Handle user registration"""
-#     # Check if username already exists
-#     if await db["users"].find_one({"username": username}):
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Username already registered"
-#         )
-    
-#     # Create new user with hashed password
-#     hashed_password = get_password_hash(password)
-#     user_data = {
-#         "username": username,
-#         "hashed_password": hashed_password
-#     }
-    
-#     # Insert into database
-#     await db["users"].insert_one(user_data)
-    
-#     return {"message": "User registered successfully"}
+    await test_mongo_connection()
 
 @app.post("/token")
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -491,4 +488,4 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)

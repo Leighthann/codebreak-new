@@ -159,3 +159,6 @@ To play with multiple players, you have two options:
 ## Support
 
 For additional help or to report issues, please contact the development team or submit an issue to the project repository.
+
+
+uvicorn backend.server:app --host 0.0.0.0 --port 8000 --reload
