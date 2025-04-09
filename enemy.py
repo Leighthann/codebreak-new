@@ -3,6 +3,7 @@ import random
 import json
 import asyncio
 import websockets
+import math
 from typing import Dict
 from effects import GameEffects
 
@@ -71,15 +72,23 @@ class Enemy:
             self.health = min(self.max_health, self.health + 10)
 
     async def update(self, player):
-        if not player:
+        if not player or not self.active:
             return
-        distance = ((self.x - player.x) ** 2 + (self.y - player.y) ** 2) ** 0.5
+        #distance = ((self.x - player.x) ** 2 + (self.y - player.y) ** 2) ** 0.5
+        dx = player.x - self.x
+        dy = player.y - self.y
+        distance = math.sqrt(dx*dx + dy*dy)
         if distance < self.attack_range:
             self.state = "attack"
             await self.attack_player(player)
         elif distance < self.chase_range:
             self.state = "chase"
             self.chase_player(player)
+            if distance > 0:
+                dx = dx / distance * self.speed
+                dy = dy / distance * self.speed
+                self.x += dx
+                self.y += dy
         else:
             self.state = "idle"
 

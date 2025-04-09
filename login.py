@@ -165,6 +165,7 @@ def login_or_register(username, password, mode="login"):
                     with open("auth_token.json", "w") as f:
                         json.dump({
                             "username": username,
+                            "password":password,
                             "token": token_data["access_token"],
                             "token_type": token_data["token_type"]
                         }, f)

@@ -919,35 +919,34 @@ class Game:
         pass
 
     def update_wave_spawning(self, dt):
-        """Handle enemy wave spawning."""
-        # If no wave active, start first wave
-        if self.wave_number == 0:
-            self.start_new_wave()
-            return
-        
-        # If still spawning enemies for current wave
-        if self.enemies_to_spawn > 0:
-            self.spawn_timer += dt
-            if self.spawn_timer >= 1.0:  # Spawn every second
-                self.spawn_timer = 0
-                self.spawn_wave_enemy()
-        # If all enemies are defeated, start new wave
-        elif len(self.enemies) == 0:
-            self.next_wave_timer += dt
-            if self.next_wave_timer >= 3.0:  # 3 second pause between waves
-                self.next_wave_timer = 0
+        """Update wave spawning system"""
+        if len(self.enemies) == 0 and self.enemies_to_spawn <= 0:
+            # Start new wave after delay
+            if self.next_wave_timer <= 0:
                 self.start_new_wave()
+            else:
+                self.next_wave_timer -= dt
+        elif self.enemies_to_spawn > 0:
+            # Spawn enemies gradually
+            if self.spawn_timer <= 0:
+                self.spawn_wave_enemy()
+                self.spawn_timer = 1.0  # 1 second between spawns
+            else:
+                self.spawn_timer -= dt
 
     def start_new_wave(self):
         """Start a new enemy wave."""
         self.wave_number += 1
+        print(f"Starting wave {self.wave_number}")  # Debug print
         
         # Calculate enemies based on wave and difficulty
-        base_enemies = 3 + self.wave_number
+        base_enemies = 3 + (self.wave_number *2)  # Increase this value to spawn more enemies per wave
         difficulty_mult = {"Easy": 0.7, "Normal": 1.0, "Hard": 2.0}
         difficulty_factor = difficulty_mult.get(self.settings["difficulty"], 1.0)
         
-        self.enemies_to_spawn = int(base_enemies * difficulty_factor)
+        self.enemies_to_spawn = int(base_enemies * difficulty_factor)  # Total enemies to spawn
+        self.enemies_to_spawn = max(3, int(base_enemies * difficulty_factor))
+        print(f"Spawning {self.enemies_to_spawn} enemies")  # Debug print
         self.spawn_timer = 0
         
         # Show wave notification
@@ -969,28 +968,32 @@ class Game:
             self.spawn_wave_enemy()
             self.enemies_to_spawn -= 1
 
+        print(f"Initial spawn complete. {self.enemies_to_spawn} enemies remaining")  # Debug print
+
     def spawn_wave_enemy(self):
         """Spawn a single enemy for the current wave."""
         if self.enemies_to_spawn <= 0:
             return
         
         # Always spawn at screen edge
+         # Determine spawn position at screen edge
+        margin = 100  # Increased margin to prevent instant collisions
         side = random.randint(0, 3)  # 0: top, 1: right, 2: bottom, 3: left
         if side == 0:  # Top
-            x = random.randint(50, WIDTH - 50)
-            y = -50
+            x = random.randint(margin, WIDTH - margin)
+            y = -margin
         elif side == 1:  # Right
-            x = WIDTH + 50
-            y = random.randint(50, HEIGHT - 50)
+            x = WIDTH + margin
+            y = random.randint(margin, HEIGHT - margin)
         elif side == 2:  # Bottom
-            x = random.randint(50, WIDTH - 50)
-            y = HEIGHT + 50
+            x = random.randint(margin, WIDTH - margin)
+            y = HEIGHT + margin
         else:  # Left
-            x = -50
-            y = random.randint(50, HEIGHT - 50)
+            x = -margin
+            y = random.randint(margin, HEIGHT - margin)
         
         # Create enemy
-        enemy = Enemy(self.enemy_sprite_sheet, x, y, server_url="http://example.com")
+        enemy = Enemy(self.enemy_sprite_sheet, x, y, server_url="http://127.0.0.1:8000")
         enemy.active = True
         
         # Scale stats based on wave
@@ -1001,6 +1004,7 @@ class Game:
         
         self.enemies.append(enemy)
         self.enemies_to_spawn -= 1
+        print(f"Spawned enemy at ({x}, {y}). {self.enemies_to_spawn} remaining")  # Debug print
 
     def spawn_resources(self, count):
         """Spawn resources in the world."""

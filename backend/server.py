@@ -30,6 +30,10 @@ from backend.auth import (
 
 app = FastAPI(title="CodeBreak Game API")
 
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the CodeBreak API!"}
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -84,12 +88,50 @@ async def startup_event():
     # Create database indexes
     await create_indexes()
 
-# Authentication routes
+# # Authentication routes
+# @app.post("/register")
+# async def register_user(username: str, password: str):
+#     """Handle user registration"""
+#     # Check if username already exists
+#     if await db["users"].find_one({"username": username}):
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="Username already registered"
+#         )
+    
+#     # Create new user with hashed password
+#     hashed_password = get_password_hash(password)
+#     user_data = {
+#         "username": username,
+#         "hashed_password": hashed_password
+#     }
+    
+#     # Insert into database
+#     await db["users"].insert_one(user_data)
+    
+#     return {"message": "User registered successfully"}
+
+@app.post("/token")
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Handle user login and token generation"""
+    user = await authenticate_user(form_data.username, form_data.password, db)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
 @app.post("/register/user", response_model=dict)
-async def register_user(user: UserCreate):
-    """Register a new user with username and password"""
+async def register_user(username: str = Query(...), password: str = Query(...)):
+    """Register a new user with username and password via query parameters"""
     # Check if username already exists
-    existing_user = await db["users"].find_one({"username": user.username})
+    existing_user = await db["users"].find_one({"username": username})
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -97,9 +139,9 @@ async def register_user(user: UserCreate):
         )
     
     # Create new user
-    hashed_password = get_password_hash(user.password)
+    hashed_password = get_password_hash(password)
     user_dict = {
-        "username": user.username,
+        "username": username,
         "hashed_password": hashed_password,
         "created_at": datetime.now()
     }
@@ -108,7 +150,7 @@ async def register_user(user: UserCreate):
     
     # Initialize player data
     player = {
-        "username": user.username,
+        "username": username,
         "health": 100,
         "x": 0, 
         "y": 0,
@@ -120,35 +162,6 @@ async def register_user(user: UserCreate):
     await create_or_update_player(player)
     
     return {"status": "success", "message": "User registered successfully"}
-
-@app.post("/token", response_model=Token)
-async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    """Login to get access token"""
-    user = await authenticate_user(form_data.username, form_data.password, db)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
-    )
-    
-    # Update last login
-    await db["players"].update_one(
-        {"username": user.username},
-        {"$set": {"last_login": datetime.now()}}
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer"}
 
 # Player routes
 @app.post("/player/")

@@ -14,6 +14,7 @@ import threading
 import webbrowser
 import signal
 import json
+import requests  # Add this import for server health check
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -104,7 +105,7 @@ def check_secret_key():
     return True
 
 def start_server(host, port, headless=False):
-    """Start the FastAPI server"""
+    """Start the FastAPI server with enhanced logging."""
     print(f"Starting CodeBreak server on {host}:{port}...")
     
     # Prepare the command
@@ -113,41 +114,77 @@ def start_server(host, port, headless=False):
     
     if not headless:
         # Run in a new terminal window if not headless
-        if sys.platform.startswith('win'):
-            # Windows
-            cmd = ["start", "cmd", "/k"] + cmd
-            subprocess.Popen(" ".join(cmd), shell=True)
-        elif sys.platform.startswith('darwin'):
-            # macOS
-            applescript = f'tell application "Terminal" to do script "{" ".join(cmd)}"'
-            subprocess.Popen(["osascript", "-e", applescript])
-        else:
-            # Linux and other Unix-like systems
-            term_cmd = None
-            for terminal in ["gnome-terminal", "konsole", "xterm"]:
-                if subprocess.call(["which", terminal], stdout=subprocess.DEVNULL) == 0:
-                    if terminal == "gnome-terminal":
-                        term_cmd = [terminal, "--", " ".join(cmd)]
-                    else:
-                        term_cmd = [terminal, "-e", " ".join(cmd)]
-                    break
-            
-            if term_cmd:
-                subprocess.Popen(term_cmd)
+        try:
+            if sys.platform.startswith('win'):
+                # Windows
+                cmd = ["start", "cmd", "/k"] + cmd
+                subprocess.Popen(" ".join(cmd), shell=True)
+            elif sys.platform.startswith('darwin'):
+                # macOS
+                applescript = f'tell application "Terminal" to do script "{" ".join(cmd)}"'
+                subprocess.Popen(["osascript", "-e", applescript])
             else:
-                # Fallback to running in the background
-                print("Could not find a suitable terminal emulator. Running server in the background.")
-                subprocess.Popen(cmd)
+                # Linux and other Unix-like systems
+                term_cmd = None
+                for terminal in ["gnome-terminal", "konsole", "xterm"]:
+                    if subprocess.call(["which", terminal], stdout=subprocess.DEVNULL) == 0:
+                        if terminal == "gnome-terminal":
+                            term_cmd = [terminal, "--", " ".join(cmd)]
+                        else:
+                            term_cmd = [terminal, "-e", " ".join(cmd)]
+                        break
+                
+                if term_cmd:
+                    subprocess.Popen(term_cmd)
+                else:
+                    # Fallback to running in the background
+                    print("Could not find a suitable terminal emulator. Running server in the background.")
+                    subprocess.Popen(cmd)
+        except Exception as e:
+            print(f"Error starting server: {e}")
+            sys.exit(1)
     else:
         # Run headless (same process or background)
-        process = subprocess.Popen(cmd)
-        print(f"Server process started with PID: {process.pid}")
-        return process
+        try:
+            #process = subprocess.Popen(cmd)
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            stdout, stderr = process.communicate()
+            print("Server Output:", stdout)
+            print("Server Error:", stderr)
+            print(f"Server process started with PID: {process.pid}")
+            return process
+        except Exception as e:
+            print(f"Error starting server in headless mode: {e}")
+            sys.exit(1)
     
     # Give the server some time to start up
     time.sleep(SERVER_STARTUP_WAIT)
     print("Server startup wait complete.")
     return None
+
+def wait_for_server(host, port, retries=10, delay=2):
+    """Wait for the server to become reachable and provide detailed error messages."""
+    server_url = f"http://{host}:{port}"
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"Attempt {attempt}/{retries}: Checking server at {server_url}...")
+            response = requests.get(server_url, timeout=5)
+            if response.status_code == 200:
+                print(f"Server is reachable at {server_url}")
+                return True
+            else:
+                print(f"Server responded with status code {response.status_code}.")
+        except requests.ConnectionError as e:
+            print(f"Attempt {attempt}/{retries}: Unable to connect to the server. Error: {e}")
+            print("Ensure the server is running and accessible.")
+        except requests.Timeout:
+            print(f"Attempt {attempt}/{retries}: Connection timed out.")
+        except Exception as e:
+            print(f"Attempt {attempt}/{retries}: Unexpected error: {e}")
+        time.sleep(delay)
+    print(f"Failed to connect to the server at {server_url} after {retries} attempts.")
+    print("Please check if the server is running and accessible.")
+    return False
 
 def launch_login(server_url=None):
     """Launch the login page"""
@@ -206,6 +243,10 @@ def main():
     if not args.client_only:
         server_process = start_server(args.host, args.port, args.headless)
         print(f"Server started at {server_url}")
+        
+        if not wait_for_server(args.host if args.host != "0.0.0.0" else "localhost", args.port):
+            print("Exiting due to server connection failure.")
+            sys.exit(1)
         
         if args.docs:
             open_docs(args.host if args.host != "0.0.0.0" else "localhost", args.port)
