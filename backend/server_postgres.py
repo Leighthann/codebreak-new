@@ -604,6 +604,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                     if "x" in data and "y" in data:
                         x = data["x"]
                         y = data["y"]
+                        direction = data.get("direction", "down")  # Get direction with default
                         
                         # Update in database
                         conn = get_db_connection()
@@ -620,7 +621,8 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                         await manager.broadcast({
                             "event": "player_moved",
                             "username": username,
-                            "position": {"x": x, "y": y}
+                            "position": {"x": x, "y": y},
+                            "direction": direction
                         }, exclude=username)
                 
                 elif action == "chat_message":
@@ -631,6 +633,29 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                             "message": data["message"],
                             "timestamp": datetime.now().isoformat()
                         })
+                
+                elif action == "get_all_players":
+                    # Get all active players from database
+                    try:
+                        conn = get_db_connection()
+                        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                        # Get players who have logged in within the last hour
+                        cursor.execute(
+                            "SELECT username, x, y FROM players WHERE last_login > NOW() - INTERVAL '1 hour'"
+                        )
+                        all_players = cursor.fetchall()
+                        cursor.close()
+                        conn.close()
+                        
+                        # Send player list to the requesting client
+                        players_list = [{"username": p["username"], "x": p["x"], "y": p["y"]} for p in all_players]
+                        await websocket.send_json({
+                            "event": "all_players",
+                            "players": players_list
+                        })
+                        logger.info(f"Sent list of {len(players_list)} players to {username}")
+                    except Exception as e:
+                        logger.error(f"Error fetching all players: {e}")
                 
                 # Add other action handlers as needed
     

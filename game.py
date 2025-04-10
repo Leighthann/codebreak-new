@@ -518,6 +518,9 @@ class Game:
         self.next_wave_timer = 0
         self.wave_number = 0
 
+
+        self.other_players = {}
+
     def load_fonts(self):
         """Load fonts for the game."""
         # Try to load custom font, fall back to system font
@@ -655,6 +658,9 @@ class Game:
                 
                 # E key - Tool usage (one-time press detection for feedback)
                 elif event.key == pygame.K_e and not self.show_crafting:
+                    if not self.player:
+                        return
+                    
                     if not self.player.equipped_tool:
                         self.add_effect("text", self.player.x, self.player.y - 30,
                                        text="No tool equipped!",
@@ -662,6 +668,10 @@ class Game:
                                        size=20,
                                        duration=2.0)
                         print("DEBUG: E key pressed but no tool equipped")
+                        print(f"DEBUG: Player.equipped_tool = {self.player.equipped_tool}")
+                        print(f"DEBUG: Player.crafted_items = {self.player.crafted_items}")
+                    else:
+                        print(f"DEBUG: E key pressed with tool: {self.player.equipped_tool['name']}")
         
         # Handle continuous gameplay actions when crafting menu is closed
         if not self.show_crafting:
@@ -828,25 +838,47 @@ class Game:
             print(f"DEBUG: Attempting to craft {item_name}")
             print(f"DEBUG: Player inventory: {self.player.inventory}")
             
-            # Attempt to craft the item
-            if self.player.craft_item(item_name):
-                self.play_sound("level_up")  # Success sound
-                self.add_effect("text", self.player.x, self.player.y - 30,
-                              text=f"Crafted {item_name.replace('_', ' ').title()}!",
-                              color=GREEN,
-                              size=20,
-                              duration=2.0)
-                print(f"DEBUG: Successfully crafted {item_name}")
-                print(f"DEBUG: Updated inventory: {self.player.inventory}")
-                print(f"DEBUG: Player crafted items: {self.player.crafted_items}")
-            else:
-                self.play_sound("menu_select")  # Failure sound
-                self.add_effect("text", self.player.x, self.player.y - 30,
-                              text="Not enough resources!",
-                              color=RED,
-                              size=20,
-                              duration=2.0)
-                print(f"DEBUG: Failed to craft {item_name}")
+            # Show immediate feedback
+            self.add_effect("text", self.player.x, self.player.y - 60,
+                          text=f"Crafting {item_name.replace('_', ' ').title()}...",
+                          color=CYAN,
+                          size=20,
+                          duration=1.0)
+            
+            # Create and schedule task - can't use await directly in a non-async method
+            async def craft_task():
+                player = self.player
+                if not player:
+                    return
+                
+                # Attempt to craft the item
+                if await player.craft_item(item_name):
+                    self.play_sound("level_up")  # Success sound
+                    self.add_effect("text", player.x, player.y - 30,
+                                  text=f"Crafted {item_name.replace('_', ' ').title()}!",
+                                  color=GREEN,
+                                  size=20,
+                                  duration=2.0)
+                    print(f"DEBUG: Successfully crafted {item_name}")
+                    print(f"DEBUG: Updated inventory: {player.inventory}")
+                    print(f"DEBUG: Player crafted items: {player.crafted_items}")
+                    
+                    # Print debug info about equipped tool
+                    print(f"DEBUG: Player equipped tool: {player.equipped_tool}")
+                    
+                    # Auto-close crafting menu after successful crafting
+                    self.show_crafting = False
+                else:
+                    self.play_sound("menu_select")  # Failure sound
+                    self.add_effect("text", player.x, player.y - 30,
+                                  text="Not enough resources!",
+                                  color=RED,
+                                  size=20,
+                                  duration=2.0)
+                    print(f"DEBUG: Failed to craft {item_name}")
+                    
+            # Use create_task instead of ensure_future for consistency
+            asyncio.create_task(craft_task())
         else:
             print(f"DEBUG: Invalid craft index {index}, available recipes: {recipes}")
 
@@ -1096,9 +1128,6 @@ class Game:
                         self.player.inventory[resource["type"]] = 0
                     self.player.inventory[resource["type"]] += resource["value"]
                     
-                    # Update score
-                    self.score += resource["value"] * 10
-                    
                     # Play sound
                     self.play_sound("collect")
                     
@@ -1238,6 +1267,35 @@ class Game:
         # Draw player
         if self.player and self.player.sprite:
             world_surface.blit(self.player.sprite, (self.player.x, self.player.y))
+        
+        # Draw other players
+        if hasattr(self, "other_players") and isinstance(self.other_players, dict):
+            for username, player_data in self.other_players.items():
+                # Draw username above player
+                name_text = self.font_sm.render(username, True, NEON_GREEN)
+                name_rect = name_text.get_rect(centerx=player_data["x"] + 24, bottom=player_data["y"] - 5)
+                world_surface.blit(name_text, name_rect)
+                
+                # Select sprite based on direction
+                sprite = None
+                direction = player_data.get("direction", "down")
+                
+                # If we have the player spritesheet, use appropriate direction sprite
+                if self.player and hasattr(self.player, f"walk_{direction}"):
+                    sprite_array = getattr(self.player, f"walk_{direction}")
+                    if sprite_array:
+                        # Animate by cycling through available frames
+                        time_since_update = (pygame.time.get_ticks() - player_data.get("last_update", 0)) % 600
+                        frame_index = (time_since_update // 150) % len(sprite_array)
+                        sprite = sprite_array[frame_index]
+                
+                # If we don't have an appropriate sprite, use a colored rectangle
+                if not sprite:
+                    sprite = pygame.Surface((48, 48), pygame.SRCALPHA)
+                    sprite.fill(NEON_PURPLE)  # Use a different color to distinguish from player
+                
+                # Draw the sprite
+                world_surface.blit(sprite, (player_data["x"], player_data["y"]))
         
         # Draw projectiles
         if self.player:
@@ -2277,6 +2335,7 @@ class Game:
         self.resources = []
         self.power_ups = []
         self.effects_list = []
+        self.other_players = {}
         
         
         # Load sprites
@@ -2726,6 +2785,7 @@ class Game:
         self.resources = []
         self.power_ups = []
         self.effects_list = []
+        self.other_players = {}
     
         # Load sprites
         self.load_sprites()
@@ -2835,81 +2895,54 @@ class Game:
 
     def handle_player_defeat(self):
         """Handle player defeat logic and submit game session data"""
-        # Play game over sound
-        self.play_sound("game_over")
-    
-        # Create explosion particle effect
-        for _ in range(30):
-            angle = random.uniform(0, 2 * math.pi)
-            speed = random.uniform(2, 5)
-            self.effects_list.append({
-                "type": "particle",
-                "position": (self.player.x + self.player.width // 2, 
-                       self.player.y + self.player.height // 2) if self.player else (0, 0),
-                "velocity": (math.cos(angle) * speed, math.sin(angle) * speed),
-                "color": (255, 100, 50),
-                "size": random.uniform(2, 6),
-                "duration": random.randint(30, 60),
-                "timer": 0
-            })
-    
-        # Add game over text
-        self.effects_list.append({
-            "type": "text",
-            "text": "GAME OVER",
-            "position": (WIDTH // 2, HEIGHT // 2),
-            "color": (255, 0, 0),
-            "size": 80,
-            "duration": 180,
-            "timer": 0,
-            "fade_in": True
-        })
-    
-        # Add score text
-        self.effects_list.append({
-            "type": "text",
-            "text": f"SCORE: {self.score}",
-            "position": (WIDTH // 2, HEIGHT // 2 + 80),
-            "color": (255, 255, 255),
-            "size": 40,
-            "duration": 180,
-            "timer": 0,
-            "fade_in": True
-        })
-    
-        # Submit death event via WebSocket
-        if self.player and hasattr(self.player, 'ws') and self.player.ws:
-            try:
-                session_data = {
-                    "action": "player_died",
-                    "session_data": {
-                    "score": self.score,
-                    "enemies_defeated": len(self.enemies),
-                    "waves_completed": self.wave_number,
-                    "survival_time": self.survival_time
-                    }
-                }
-                asyncio.create_task(self.player.ws.send(json.dumps(session_data)))
-            except Exception as e:
-                print(f"Error sending death event: {e}")
-    
-        # Remove player to prevent further updates
-        self.player = None
-    
-        # Set up timer for transition to game over screen
-        pygame.time.set_timer(pygame.USEREVENT, 3000)  # 3 second timer
-    
-        # Set up one-time event handler
-        def handle_game_over_event(event):
-            if event.type == pygame.USEREVENT:
-                pygame.time.set_timer(pygame.USEREVENT, 0)  # Disable timer
-                pygame.event.set_allowed(None)  # Reset event filtering
-                self.transition_to("game_over")
-                return True
-            return False
-    
-        # Add event handler
-        pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.USEREVENT])  # Filter event
+        if not hasattr(self, 'game_over_triggered'):
+            self.game_over_triggered = True
+            
+            # Play game over sound
+            self.play_sound("game_over")
+        
+            # Create explosion particle effect
+            for _ in range(30):
+                angle = random.uniform(0, 2 * math.pi)
+                speed = random.uniform(2, 5)
+                self.effects_list.append({
+                    "type": "particle",
+                    "position": (self.player.x + self.player.width // 2, 
+                           self.player.y + self.player.height // 2) if self.player else (0, 0),
+                    "velocity": (math.cos(angle) * speed, math.sin(angle) * speed),
+                    "color": (255, 100, 50),
+                    "size": random.uniform(2, 6),
+                    "duration": random.randint(30, 60),
+                    "timer": 0
+                })
+        
+            # Add game over text effect
+            self.add_effect("text", WIDTH // 2, HEIGHT // 2, 
+                          text="GAME OVER", 
+                          color=(255, 0, 0), 
+                          size=80,
+                          duration=3.0)
+            
+            # Add score text effect
+            self.add_effect("text", WIDTH // 2, HEIGHT // 2 + 80,
+                          text=f"SCORE: {self.score}",
+                          color=(255, 255, 255),
+                          size=40,
+                          duration=3.0)
+            
+            # Remove player to prevent further updates
+            self.player = None
+            
+            # Transition to game over state after delay
+            pygame.time.set_timer(pygame.USEREVENT, 3000)  # 3 second delay
+            pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.USEREVENT])
+            
+            # Schedule transition to game over state
+            asyncio.create_task(self._transition_after_delay())
+
+    async def _transition_after_delay(self):
+        await asyncio.sleep(3)
+        self.transition_to("game_over")
 
     async def update_game_world(self, dt):
         """Update all game world elements."""
@@ -2938,6 +2971,20 @@ class Game:
         
         # Update wave spawning
         self.update_wave_spawning(dt)
+        
+        # Clean up inactive other players
+        self.cleanup_inactive_players()
+        
+        # Update camera shake
+
+    def cleanup_inactive_players(self, max_idle_time=30000):  # 30 seconds
+        """Remove players that haven't updated in too long"""
+        current_time = pygame.time.get_ticks()
+        for username in list(self.other_players.keys()):
+            last_update = self.other_players[username].get("last_update", 0)
+            if current_time - last_update > max_idle_time:
+                print(f"Player {username} timed out (inactive)")
+                del self.other_players[username]
 
 class ChatSystem:
     def __init__(self, font, max_messages=5):

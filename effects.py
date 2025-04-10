@@ -74,6 +74,10 @@ class GameEffects:
     def play_collect_sound(self):
         """Play the collect sound."""
         self.play_sound("collect")
+    
+    def play_game_over_sound(self):
+        """Play the game over sound."""
+        self.play_sound("game_over")
 
     def create_particles(self, x, y, color, count=10, speed=3, size_range=(1, 3), lifetime=30):
         """Create particle effect at the specified position."""

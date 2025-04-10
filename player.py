@@ -189,29 +189,53 @@ class Player:
             self.connected = True
             print(f"Connected to WebSocket as {self.username}")
             
+            # Request all current players
+            if self.ws:
+                try:
+                    request_data = {
+                        "action": "get_all_players"
+                    }
+                    await self.ws.send(json.dumps(request_data))
+                except Exception as e:
+                    print(f"Failed to request player list: {e}")
+        
             # Start background task to listen for server messages
             self.listener_task = asyncio.create_task(self.listen_for_server_messages())
+            
+            # Start background task to periodically refresh player list
+            self.refresh_task = asyncio.create_task(self.periodic_refresh())
+            
         except Exception as e:
             self.connected = False
             print(f"Failed to connect to WebSocket: {e}")
+            
+    async def periodic_refresh(self):
+        """Periodically requests all players from the server"""
+        refresh_interval = 10  # Seconds between refreshes
+        
         try:
-            if not hasattr(self, 'auth_token'):
-                print("Not authenticated, connecting without token")
-                self.ws = await websockets.connect(f"ws://localhost:8000/ws/{self.username}")
-            else:
-                # Include token in the connection
-                self.ws = await websockets.connect(
-                    f"ws://localhost:8000/ws/{self.username}?token={self.auth_token}"
-                )
-        
-            self.connected = True
-            print(f"Connected to WebSocket as {self.username}")
-        
-            # Start background task to listen for server messages
-            self.listener_task = asyncio.create_task(self.listen_for_server_messages())
+            while self.connected and self.ws:
+                # Wait for the specified interval
+                await asyncio.sleep(refresh_interval)
+                
+                # Request all players
+                if self.ws:
+                    try:
+                        request_data = {
+                            "action": "get_all_players"
+                        }
+                        await self.ws.send(json.dumps(request_data))
+                    except Exception as e:
+                        print(f"Failed to request player list during refresh: {e}")
+                        if not self.connected:
+                            break
+        except asyncio.CancelledError:
+            # Task was cancelled, clean exit
+            pass
         except Exception as e:
-            self.connected = False
-            print(f"Failed to connect to WebSocket: {e}")
+            print(f"Error in periodic refresh: {e}")
+            if self.connected:
+                self.connected = False
 
     async def end_game_session(self, session_id, score, enemies_defeated, waves_completed):
         """End the current game session with stats"""
@@ -301,6 +325,27 @@ class Player:
             self.connected = False
             print(f"Failed to connect to WebSocket: {e}")
 
+    async def disconnect(self):
+        """Gracefully disconnect from the server and clean up tasks"""
+        self.connected = False
+        
+        # Cancel refresh task if it exists
+        if hasattr(self, 'refresh_task') and self.refresh_task:
+            try:
+                self.refresh_task.cancel()
+                await asyncio.sleep(0.1)  # Give it a moment to cancel
+            except Exception as e:
+                print(f"Error cancelling refresh task: {e}")
+                
+        # Close websocket if it exists
+        if hasattr(self, 'ws') and self.ws:
+            try:
+                await self.ws.close()
+            except Exception as e:
+                print(f"Error closing websocket: {e}")
+                
+        print("Disconnected from server")
+
     async def listen_for_server_messages(self):
         """Listen for incoming messages from the server"""
         if not self.connected or not self.ws:
@@ -318,10 +363,10 @@ class Player:
                     await self.handle_server_event(data)
         except websockets.exceptions.ConnectionClosed:
             print("WebSocket connection closed")
-            self.connected = False
+            await self.disconnect()
         except Exception as e:
             print(f"Error in WebSocket listener: {e}")
-            self.connected = False
+            await self.disconnect()
 
     async def handle_server_event(self, data):
         """Handle different types of server events"""
@@ -331,6 +376,15 @@ class Player:
             joined_username = data.get('username')
             print(f"Player joined: {joined_username}")
             if joined_username != self.username:  # Don't show for self
+                if hasattr(self, "game_ref") and self.game_ref:
+                    # Add player to other_players list
+                    self.game_ref.other_players[joined_username] = {
+                        "x": 0,  # Default position until we get an update
+                        "y": 0,
+                        "direction": "down",
+                        "last_update": pygame.time.get_ticks(),
+                        "sprite": self.idle  # Use player's idle sprite
+                    }
                 if hasattr(self, "game_ref") and hasattr(self.game_ref, "chat_system"):
                     if self.game_ref and hasattr(self.game_ref, "chat_system"):
                         self.game_ref.chat_system.add_message("", f"{joined_username} joined the game", system_message=True)
@@ -338,9 +392,12 @@ class Player:
         elif event_type == "player_left":
             left_username = data.get("username", "Unknown")
             print(f"Player left: {left_username}")
-        if hasattr(self, "game_ref") and hasattr(self.game_ref, "chat_system"):
-            if self.game_ref and hasattr(self.game_ref, "chat_system") and self.game_ref.chat_system:
-                self.game_ref.chat_system.add_message("", f"{left_username} left the game", system_message=True)
+            # Remove player from other_players list
+            if hasattr(self, "game_ref") and self.game_ref and left_username in self.game_ref.other_players:
+                del self.game_ref.other_players[left_username]
+            if hasattr(self, "game_ref") and hasattr(self.game_ref, "chat_system"):
+                if self.game_ref and hasattr(self.game_ref, "chat_system") and self.game_ref.chat_system:
+                    self.game_ref.chat_system.add_message("", f"{left_username} left the game", system_message=True)
     
         elif event_type == "item_drop":
             print(f"Item dropped at x:{data.get('x')}, y:{data.get('y')}")
@@ -353,19 +410,85 @@ class Player:
     
         elif event_type == "chat_message":
             sender = data.get("username", "Unknown")
-        message = data.get("message", "")
-        if hasattr(self, "game_ref") and hasattr(self.game_ref, "chat_system"):
-            if self.game_ref and hasattr(self.game_ref, "chat_system") and self.game_ref.chat_system:
-                self.game_ref.chat_system.add_message(sender, message)
-        print(f"Chat: {sender}: {message}")
-    
+            message = data.get("message", "")
+            if hasattr(self, "game_ref") and hasattr(self.game_ref, "chat_system"):
+                if self.game_ref and hasattr(self.game_ref, "chat_system") and self.game_ref.chat_system:
+                    self.game_ref.chat_system.add_message(sender, message)
+            print(f"Chat: {sender}: {message}")
+
+        elif event_type == "player_moved":
+            username = data.get("username")
+            position = data.get("position")
+            direction = data.get("direction", "down")  # Get direction with default
+            
+            if username != self.username and position:  # Only track other players
+                # Update other player position in the game
+                if hasattr(self, "game_ref") and self.game_ref:
+                    # Create player data if not exists
+                    if not hasattr(self.game_ref, "other_players"):
+                        self.game_ref.other_players = {}
+                        
+                    if username not in self.game_ref.other_players:
+                        self.game_ref.other_players[username] = {
+                            "x": position["x"],
+                            "y": position["y"],
+                            "direction": direction,  # Use direction from server
+                            "last_update": pygame.time.get_ticks(),
+                            "sprite": self.idle  # Use a copy of the player's sprite for now
+                        }
+                    else:
+                        # Update existing player data
+                        self.game_ref.other_players[username]["x"] = position["x"]
+                        self.game_ref.other_players[username]["y"] = position["y"]
+                        self.game_ref.other_players[username]["direction"] = direction  # Use direction from server
+                        self.game_ref.other_players[username]["last_update"] = pygame.time.get_ticks()
+                        
+                        # Store previous position for next update
+                        self.game_ref.other_players[username]["prev_x"] = position["x"]
+                        self.game_ref.other_players[username]["prev_y"] = position["y"]
+
+        elif event_type == "all_players":
+            players_list = data.get("players", [])
+            print(f"Received list of {len(players_list)} players from server")
+            
+            if hasattr(self, "game_ref") and self.game_ref:
+                # Make sure other_players exists
+                if not hasattr(self.game_ref, "other_players"):
+                    self.game_ref.other_players = {}
+                
+                # Add all players to our tracking dict
+                for player_data in players_list:
+                    player_username = player_data.get("username")
+                    
+                    # Skip ourselves
+                    if player_username == self.username:
+                        continue
+                        
+                    # Create or update player entry
+                    if player_username not in self.game_ref.other_players:
+                        self.game_ref.other_players[player_username] = {
+                            "x": player_data.get("x", 0),
+                            "y": player_data.get("y", 0),
+                            "direction": "down",  # Default direction
+                            "last_update": pygame.time.get_ticks(),
+                            "sprite": self.idle  # Use a copy of the player's sprite for now
+                        }
+                    else:
+                        # Just update position if we're already tracking this player
+                        self.game_ref.other_players[player_username]["x"] = player_data.get("x", 0)
+                        self.game_ref.other_players[player_username]["y"] = player_data.get("y", 0)
+                        self.game_ref.other_players[player_username]["last_update"] = pygame.time.get_ticks()
+
     async def send_update(self):
         """Sends updated player data to the server"""
         if self.ws:
             update_data = {
-                "location": {"x": self.x, "y": self.y},
+                "action": "update_position",
+                "x": self.x,
+                "y": self.y,
                 "health": self.health,
-                "inventory": self.inventory
+                "inventory": self.inventory,
+                "direction": self.direction  # Include player direction
             }
             await self.ws.send(json.dumps(update_data))
 
@@ -643,7 +766,11 @@ class Player:
                 self.is_invincible = True
                 self.invincibility_timer = pygame.time.get_ticks()
 
-                 # Notify server of damage taken
+                # Check if player died
+                if self.health <= 0 and self.game_ref:
+                    self.game_ref.handle_player_defeat()
+                
+                # Notify server of damage taken
                 if self.connected and self.ws:
                     try:
                         damage_data = {
