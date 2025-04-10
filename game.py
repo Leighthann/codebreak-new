@@ -442,8 +442,6 @@ class Game:
         self.next_state = None
         self.show_crafting = False  # New flag for crafting UI
 
-        # Load settings if available
-        self.load_settings()
 
         # Settings
         self.settings = {
@@ -453,6 +451,9 @@ class Game:
             "show_damage": True,
             "difficulty": "Normal"
         }
+
+        #Load settings if available
+        self.load_settings()
 
         # Initialize game assets
         self.load_fonts()
@@ -665,14 +666,19 @@ class Game:
         # Handle continuous gameplay actions when crafting menu is closed
         if not self.show_crafting:
             # Process movement
-            moving = self.player.move(keys, self.world_generator)
-            if asyncio.iscoroutine(moving):
-                self.player.is_moving = await moving  # Await if it's a coroutine
-            else:
-                self.player.is_moving = moving  # Otherwise, assign directly
+            try:
+                # Always await the move method since it's an async method
+                moving = await self.player.move(keys, self.world_generator)
+                self.player.is_moving = moving
+                
+                # Debug print to see if movement is being detected
+                if moving:
+                    print(f"Player moved to: {self.player.x}, {self.player.y}")
+            except Exception as e:
+                print(f"Error in player movement: {e}")
             
             # Update player energy
-            self.player.update_energy(dt)  # Add this line
+            self.player.update_energy(dt)
             
             # Handle tool usage with E key
             if keys[pygame.K_e] and self.player.equipped_tool:
@@ -712,15 +718,12 @@ class Game:
             
             # Update player animation
             if asyncio.iscoroutinefunction(self.player.animate):
-                await self.player.animate(moving, keys, self.enemies)
+                self.player.sprite = await self.player.animate(moving, keys, self.enemies)
             else:
-                if asyncio.iscoroutinefunction(self.player.animate):
-                    await self.player.animate(moving, keys, self.enemies)
-                else:
-                    await self.player.animate(moving, keys, self.enemies)
+                self.player.sprite = self.player.animate(moving, keys, self.enemies)
             
             # Update game world
-            self.update_game_world(dt)  # Pass the proper dt value
+            await self.update_game_world(dt)  # Pass the proper dt value
         
         # Update camera shake
         if self.screen_shake_duration > 0:
@@ -847,60 +850,36 @@ class Game:
         else:
             print(f"DEBUG: Invalid craft index {index}, available recipes: {recipes}")
 
-    def update_game_world(self, dt):
-        """Update game world entities and check collisions."""
-        # Update survival time
-        self.survival_time += dt
-        
-        # Update wave spawning
-        self.update_wave_spawning(dt)
-        
-        # Update enemies
-        self.update_enemies(dt)
-        
-        # Update resources
-        self.update_resources(dt)
-        
-        # Update power-ups
-        self.update_power_ups(dt)
-        
-        # Update projectiles
-        self.update_projectiles(dt)
-        
-        # Update visual effects
-        self.update_visual_effects(dt)
-
-        # Update chat system
-        self.chat_system.update()
-
-
-    def update_enemies(self, dt):
+    async def update_enemies(self, dt):
         """Update all enemy entities."""
-        # Clear completed tasks
-        self.enemy_update_tasks = [task for task in self.enemy_update_tasks if not task.done()]
+        # Clear pending tasks from previous frames
+        for task in self.enemy_update_tasks:
+            if not task.done():
+                # Cancel tasks that have been running too long
+                task.cancel()
         
-        # Use a copy of the list for safe iteration
+        # Create new list for this frame's tasks
+        self.enemy_update_tasks = []
+        
+        # Process all enemies
         for enemy in self.enemies[:]:
-            if enemy.active:
-                # Update enemy logic
-                if self.player:
-                    task = asyncio.create_task(enemy.update(self.player))
-                    self.enemy_update_tasks.append(task)
+            if enemy.active and self.player:
+                # Update the enemy directly with await
+                try:
+                    await enemy.update(self.player)
+                    # Print state for debugging
+                    print(f"Enemy updated: {enemy.state}, position: ({enemy.x}, {enemy.y})")
+                except Exception as e:
+                    print(f"Error updating enemy: {e}")
                 
-                # Check if enemy is defeated
-                if enemy.health <= 0:
-                    # Spawn resources at enemy position
-                    if random.random() < 0.7:  # 70% chance to drop resources
-                        self.spawn_resource_at(enemy.x, enemy.y)
-                    
-                    # Remove from active enemies
-                    self.enemies.remove(enemy)
-                    
-                    # Update score
-                    self.score += 100 * self.wave_number
-                    
-                    # Add effect
-                    self.add_effect("explosion", enemy.x, enemy.y)
+            # Check if enemy is defeated
+            if enemy.health <= 0:
+                # Handle defeated enemy
+                if random.random() < 0.7:
+                    self.spawn_resource_at(enemy.x, enemy.y)
+                self.enemies.remove(enemy)
+                self.score += 100 * self.wave_number
+                self.add_effect("explosion", enemy.x, enemy.y)
 
     def update_resources(self, dt):
         """Update all resource entities."""
@@ -1011,7 +990,8 @@ class Game:
         wave_factor = 1.0 + (self.wave_number - 1) * 0.1
         enemy.health = int(50 * wave_factor)
         enemy.max_health = enemy.health
-        enemy.speed = int(2 * (1 + (self.wave_number - 1) * 0.05))
+        # Don't override the default speed from enemy.py
+        # enemy.speed = int(2 * (1 + (self.wave_number - 1) * 0.05))
         
         # Initialize direction based on spawn position
         if side == 0:
@@ -2922,6 +2902,34 @@ class Game:
     
         # Add event handler
         pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.USEREVENT])  # Filter event
+
+    async def update_game_world(self, dt):
+        """Update all game world elements."""
+        # Update survival time
+        self.survival_time += dt
+
+        # Update player invincibility frames
+        if self.player and hasattr(self.player, 'is_invincible'):
+            if self.player.is_invincible and pygame.time.get_ticks() - self.player.invincibility_timer >= self.player.invincibility_duration:
+                self.player.is_invincible = False
+        
+        # Update enemies
+        await self.update_enemies(dt)
+        
+        # Update resources
+        self.update_resources(dt)
+        
+        # Update projectiles
+        self.update_projectiles(dt)
+        
+        # Update visual effects
+        self.update_visual_effects(dt)
+        
+        # Update camera shake
+        self.update_camera_shake(dt)
+        
+        # Update wave spawning
+        self.update_wave_spawning(dt)
 
 class ChatSystem:
     def __init__(self, font, max_messages=5):
