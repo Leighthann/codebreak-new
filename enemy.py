@@ -11,14 +11,15 @@ class Enemy:
     def __init__(self, sprite_sheet, x, y, server_url):
         self.x = x
         self.y = y
-        self.speed = 3
+        self.speed = 1.5
         self.health = 50
-        self.max_health = 50
+        self.max_health = 100
         self.damage = 10
-        self.chase_range = 1000
+        self.chase_range = 300
         self.attack_range = 40
         self.state = "idle"
         self.direction = "down"  # Initialize direction attribute
+        
         
         # Sprite and animation
         self.sprite_width = 48
@@ -140,6 +141,8 @@ class Enemy:
     def chase_player(self, player):
         dx = player.x - self.x
         dy = player.y - self.y
+
+        #speed value is used to determine how fast enemies move towards the player
         distance = max(0.1, ((dx ** 2) + (dy ** 2)) ** 0.5)
         dx = dx / distance * self.speed
         dy = dy / distance * self.speed

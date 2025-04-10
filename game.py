@@ -932,7 +932,7 @@ class Game:
         print(f"Starting wave {self.wave_number}")  # Debug print
         
         # Calculate enemies based on wave and difficulty
-        base_enemies = 3 + (self.wave_number * 2)  # Increase this value to spawn more enemies per wave
+        base_enemies = 2 + self.wave_number   # Increase this value to spawn more enemies per wave
         difficulty_mult = {"Easy": 0.7, "Normal": 1.0, "Hard": 2.0}
         difficulty_factor = difficulty_mult.get(self.settings["difficulty"], 1.0)
         
@@ -990,8 +990,9 @@ class Game:
         wave_factor = 1.0 + (self.wave_number - 1) * 0.1
         enemy.health = int(50 * wave_factor)
         enemy.max_health = enemy.health
+        
         # Don't override the default speed from enemy.py
-        # enemy.speed = int(2 * (1 + (self.wave_number - 1) * 0.05))
+        enemy.speed = int(2 * (1 + (self.wave_number - 1) * 0.05))
         
         # Initialize direction based on spawn position
         if side == 0:
@@ -2314,11 +2315,18 @@ class Game:
         }
 
         def register_player(username):
-            url = "http://localhost:8000/register/"
-            response = requests.post(url, params={"username": username})
-            print(response.json())
+            url = "http://localhost:8000/register/user"  # Changed from /register/ to /register/user
+            response = requests.post(url, json={"username": username, "password": "default123"})  # Added password
+            try:
+                print(response.json())
+            except:
+                print(f"Registration failed with status code: {response.status_code}")
+                print(f"Response text: {response.text}")
 
-        register_player("Player1")  # Register "Player1"
+        try:
+            register_player("Player1")  # Register "Player1"
+        except Exception as e:
+            print(f"Error during player registration: {e}")
         
         # Reset crafting menu state
         self.show_crafting = False
