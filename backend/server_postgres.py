@@ -3,7 +3,7 @@ PostgreSQL-compatible server for CodeBreak application.
 This version uses direct psycopg2 connections for simplicity.
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -341,6 +341,47 @@ async def get_leaderboard(limit: int = 10):
         logger.error(f"Error retrieving leaderboard: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve leaderboard")
 
+@app.post("/leaderboard")
+async def submit_leaderboard_score(
+    score: int, 
+    wave_reached: int = 0, 
+    survival_time: float = 0,
+    current_user = Depends(get_current_user)
+):
+    """Submit a new score to the leaderboard (requires authentication)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Insert into leaderboard table
+        cursor.execute(
+            """
+            INSERT INTO leaderboard (username, score, wave_reached, survival_time, date)
+            VALUES (%s, %s, %s, %s, %s)
+            """,
+            (current_user["username"], score, wave_reached, survival_time, datetime.now())
+        )
+        
+        # Update player's best score if this one is higher
+        cursor.execute(
+            """
+            UPDATE players SET 
+                score = GREATEST(score, %s),
+                last_login = %s
+            WHERE username = %s
+            """,
+            (score, datetime.now(), current_user["username"])
+        )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return {"status": "success", "message": "Score submitted successfully"}
+    except Exception as e:
+        logger.error(f"Error submitting leaderboard score: {e}")
+        raise HTTPException(status_code=500, detail="Failed to submit score")
+
 # Game session model
 class GameSession(BaseModel):
     session_id: Optional[str] = None
@@ -555,6 +596,95 @@ async def update_inventory(
     except Exception as e:
         logger.error(f"Error updating inventory: {e}")
         raise HTTPException(status_code=500, detail="Failed to update inventory")
+
+@app.post("/items/collect")
+async def record_item_collection(
+    type: str = Body(...), 
+    name: str = Body(...), 
+    x: int = Body(...), 
+    y: int = Body(...), 
+    value: int = Body(1),
+    current_user = Depends(get_current_user)
+):
+    """Record a collected item in the items table"""
+    try:
+        username = current_user["username"]
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Insert into items table
+        cursor.execute("""
+            INSERT INTO items (type, name, x, y, value, username, collected_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            type, name, x, y, value, username, datetime.now()
+        ))
+        
+        # If it's a resource, also update player inventory
+        if type in ["code_fragments", "energy_cores", "data_shards"]:
+            # First get current inventory
+            cursor.execute(
+                "SELECT inventory FROM players WHERE username = %s",
+                (username,)
+            )
+            player_data = cursor.fetchone()
+            
+            if player_data:
+                inventory = player_data[0] if isinstance(player_data[0], dict) else json.loads(player_data[0])
+                
+                # Update inventory count
+                if type not in inventory:
+                    inventory[type] = 0
+                inventory[type] += value
+                
+                # Save updated inventory
+                cursor.execute(
+                    "UPDATE players SET inventory = %s WHERE username = %s",
+                    (json.dumps(inventory), username)
+                )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return {"success": True, "message": f"Item collected: {type}"}
+    except Exception as e:
+        logger.error(f"Error recording item collection: {e}")
+        raise HTTPException(status_code=500, detail=f"Error recording item: {str(e)}")
+
+@app.post("/items/spawn")
+async def record_item_spawn(
+    type: str = Body(...), 
+    name: str = Body(...), 
+    x: int = Body(...), 
+    y: int = Body(...), 
+    value: int = Body(1),
+    current_user = Depends(get_current_user)
+):
+    """Record a spawned item in the items table"""
+    try:
+        username = current_user["username"]
+        
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Insert into items table
+        cursor.execute("""
+            INSERT INTO items (type, name, x, y, value, username, spawned_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (
+            type, name, x, y, value, username, datetime.now()
+        ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return {"success": True, "message": f"Item spawn recorded: {type}"}
+    except Exception as e:
+        logger.error(f"Error recording item spawn: {e}")
+        raise HTTPException(status_code=500, detail=f"Error recording item spawn: {str(e)}")
 
 # More routes can be added here...
 

@@ -146,6 +146,7 @@ def initialize_database():
             )
         """)
         
+        # Create or update items table
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS items (
                 id SERIAL PRIMARY KEY,
@@ -154,7 +155,9 @@ def initialize_database():
                 x INTEGER NOT NULL,
                 y INTEGER NOT NULL,
                 value INTEGER DEFAULT 1,
-                spawned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                username VARCHAR(50) REFERENCES users(username),
+                spawned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                collected_at TIMESTAMP NULL
             )
         """)
         

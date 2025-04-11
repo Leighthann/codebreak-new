@@ -13,6 +13,7 @@ from effects import GameEffects
 from world import WorldGenerator
 from worldObject import WorldObjects
 from player import Player
+import time
 
 pygame.init()
 
@@ -442,6 +443,27 @@ class Game:
         self.next_state = None
         self.show_crafting = False  # New flag for crafting UI
 
+        # Leaderboard data
+        self.leaderboard_entries = [
+            {"name": "ByteMaster", "score": 10000, "time": 1800},
+            {"name": "CodeBreaker", "score": 8500, "time": 1500},
+            {"name": "CyberSlice", "score": 7200, "time": 1200},
+            {"name": "DataRunner", "score": 6800, "time": 1100},
+            {"name": "EncryptionKey", "score": 5500, "time": 900},
+            {"name": "FirewallHacker", "score": 4200, "time": 800},
+            {"name": "GlitchHunter", "score": 3600, "time": 700},
+            {"name": "HexHacker", "score": 2800, "time": 600},
+            {"name": "InfoSec", "score": 2000, "time": 500},
+            {"name": "JavaScripter", "score": 1500, "time": 400}
+        ]
+        self.leaderboard_last_update = 0
+        self.leaderboard = None
+        
+        # Server connection
+        self.server_url = "http://127.0.0.1:8000"
+        self.auth_token = None
+        self.username = None
+        self.load_auth_token()
 
         # Settings
         self.settings = {
@@ -500,26 +522,78 @@ class Game:
         self.bg_particles = []
         self.grid_offset_y = 0
         
-        # Last frame time for delta time calculation
-        self.last_frame_time = pygame.time.get_ticks()
-        
-        # Debug mode
-        self.debug_mode = False
-        
-        # Game effects
-        self.effects = GameEffects()
-        
-        # Add enemy tasks tracking
+        # Enemy processing
         self.enemy_update_tasks = []
         
-        # Initialize wave variables
-        self.enemies_to_spawn = 0
-        self.spawn_timer = 0
-        self.next_wave_timer = 0
-        self.wave_number = 0
-
-
+        # Multiplayer
         self.other_players = {}
+        self.last_position_update = 0
+        self.last_frame_time = pygame.time.get_ticks()
+        self.websocket = None
+        self.websocket_task = None
+        self.connected_to_server = False
+        self.connection_attempts = 0
+        self.session_id = None
+        self.score_submitted = False
+    
+    def load_auth_token(self):
+        """Load authentication token from file if available."""
+        try:
+            with open("auth_token.json", "r") as f:
+                auth_data = json.load(f)
+                self.auth_token = auth_data.get("token")
+                self.username = auth_data.get("username")
+                print(f"Loaded auth token for user: {self.username}")
+        except Exception as e:
+            print(f"Could not load auth token: {e}")
+    
+    def fetch_leaderboard(self):
+        """Fetch leaderboard data from server"""
+        if time.time() - self.leaderboard_last_update < 60:  # Only update every minute
+            return
+
+        try:
+            headers = {}
+            if self.auth_token:
+                headers["Authorization"] = f"Bearer {self.auth_token}"
+                
+            response = requests.get(f"{self.server_url}/leaderboard", headers=headers)
+            
+            if response.status_code == 200:
+                data = response.json()
+                entries = data.get("leaderboard", [])
+                
+                # Convert server data to the format used by the game
+                self.leaderboard_entries = []
+                for entry in entries:
+                    self.leaderboard_entries.append({
+                        "name": entry.get("username", "Unknown"),
+                        "score": entry.get("score", 0),
+                        "time": 0  # Server doesn't provide this yet
+                    })
+                
+                # If not enough entries, use placeholder data
+                if len(self.leaderboard_entries) < 5:
+                    placeholder_entries = [
+                        {"name": "ByteMaster", "score": 10000, "time": 1800},
+                        {"name": "CodeBreaker", "score": 8500, "time": 1500},
+                        {"name": "CyberSlice", "score": 7200, "time": 1200},
+                        {"name": "DataRunner", "score": 6800, "time": 1100},
+                        {"name": "EncryptionKey", "score": 5500, "time": 900}
+                    ]
+                    self.leaderboard_entries.extend(placeholder_entries)
+                
+                # Sort by score (descending)
+                self.leaderboard_entries.sort(key=lambda x: x.get("score", 0), reverse=True)
+                
+                # Keep only top 10
+                self.leaderboard_entries = self.leaderboard_entries[:10]
+                self.leaderboard_last_update = time.time()
+                print("Leaderboard updated from server")
+            else:
+                print(f"Failed to get leaderboard: {response.status_code}")
+        except Exception as e:
+            print(f"Error fetching leaderboard: {e}")
 
     def load_fonts(self):
         """Load fonts for the game."""
@@ -566,21 +640,24 @@ class Game:
         
         self.menu_buttons = [
             Button(button_x, 250, button_width, button_height, "START GAME", lambda: self.transition_to("gameplay")),
-            Button(button_x, 320, button_width, button_height, "SETTINGS", lambda: self.transition_to("settings")),
-            Button(button_x, 390, button_width, button_height, "QUIT", pygame.quit)
+            Button(button_x, 320, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
+            Button(button_x, 390, button_width, button_height, "SETTINGS", lambda: self.transition_to("settings")),
+            Button(button_x, 460, button_width, button_height, "QUIT", pygame.quit)
         ]
         
         # Create pause menu buttons
         self.pause_buttons = [
             Button(button_x, 250, button_width, button_height, "RESUME", lambda: self.transition_to("gameplay")),
-            Button(button_x, 320, button_width, button_height, "SETTINGS", lambda: self.transition_to("settings")),
-            Button(button_x, 390, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
+            Button(button_x, 320, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
+            Button(button_x, 390, button_width, button_height, "SETTINGS", lambda: self.transition_to("settings")),
+            Button(button_x, 460, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
         ]
         
         # Create game over buttons
         self.game_over_buttons = [
             Button(button_x, 350, button_width, button_height, "PLAY AGAIN", lambda: self.restart_game()),
-            Button(button_x, 420, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
+            Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
+            Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
         ]
         
         # Create settings controls
@@ -624,8 +701,13 @@ class Game:
     async def handle_gameplay(self, events=None, dt=1/60):
         """Handle gameplay state."""
         if not self.player:
+            # If player is gone, we must be in process of transitioning to game over
+            # Just draw any visual effects that might be active
+            self.update_visual_effects(dt)
+            self.draw_gameplay_elements()
+            self.draw_gameplay_ui()
             return
-            
+        
         keys = pygame.key.get_pressed()
         
         # Handle events first to ensure menu toggles are responsive
@@ -633,6 +715,11 @@ class Game:
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
+            elif hasattr(self, 'game_over_event_id') and event.type == self.game_over_event_id:
+                # Custom event for game over transition
+                pygame.time.set_timer(self.game_over_event_id, 0)  # Stop the timer
+                self.current_state = "game_over"
+                return
             elif self.chat_system.handle_event(event, self.player):
                     continue  # Skip other event processing if chat handled it
             elif event.type == pygame.KEYDOWN:
@@ -1073,29 +1160,67 @@ class Game:
             })
 
     def spawn_resource_at(self, x, y):
-        """Spawn a resource at a specific location."""
+        """Spawn a resource at the given location."""
+        # Determine resource type with rarity
         resource_types = ["code_fragments", "energy_cores", "data_shards"]
-        weights = [0.6, 0.3, 0.1]  # Adjusted weights to match number of resource types
+        weights = [70, 25, 5]  # Higher values = more common
         
-        # Random offset
-        x += random.randint(-10, 10)
-        y += random.randint(-10, 10)
-        
-        # Select resource type
         resource_type = random.choices(resource_types, weights=weights, k=1)[0]
         
+        # Determine resource value
+        value = 1 if resource_type == "code_fragments" else 2 if resource_type == "energy_cores" else 5
+        
         # Create resource
-        self.resources.append({
+        resource = {
             "type": resource_type,
             "x": x,
             "y": y,
             "collected": False,
             "pulse": 0,
             "pulse_dir": 1,
-            "value": 1 if resource_type == "code_fragments" else 
-                     2 if resource_type == "energy_cores" else
-                     5 if resource_type == "data_shards" else 10
-        })
+            "value": value
+        }
+        
+        # Add to resources list
+        self.resources.append(resource)
+        
+        # Record in database if authenticated
+        if self.auth_token and self.username:
+            try:
+                headers = {"Authorization": f"Bearer {self.auth_token}"}
+                data = {
+                    "type": resource_type,
+                    "name": resource_type,
+                    "x": int(x),
+                    "y": int(y),
+                    "value": value
+                }
+                
+                # Send data to server asynchronously later
+                asyncio.create_task(self.record_spawn_in_database(data, headers))
+            except Exception as e:
+                print(f"Error recording resource spawn: {e}")
+        
+        return resource
+
+    async def record_spawn_in_database(self, data, headers):
+        """Record a spawned item in the database asynchronously"""
+        try:
+            # Try to use requests since aiohttp might not be available
+            response = requests.post(
+                f"{self.server_url}/items/spawn",
+                json=data,
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                # Success, nothing to do
+                pass
+            else:
+                print(f"Failed to record spawn: {response.status_code} - {response.text}")
+        except Exception as e:
+            print(f"Error recording spawn in database: {e}")
+            # Ignore errors to prevent game crashes
 
     def check_resource_collection(self):
         """Check if player has collected resources."""
@@ -1127,6 +1252,14 @@ class Game:
                     if resource["type"] not in self.player.inventory:
                         self.player.inventory[resource["type"]] = 0
                     self.player.inventory[resource["type"]] += resource["value"]
+                    
+                    # Record in database
+                    self.record_item_collection(
+                        item_type=resource["type"],
+                        x=resource["x"],
+                        y=resource["y"],
+                        value=resource["value"]
+                    )
                     
                     # Play sound
                     self.play_sound("collect")
@@ -1713,13 +1846,7 @@ class Game:
             self.screen.blit(time_text, (600, y_pos + 12))
         
         # Draw back button
-        back_btn = Button("BACK", WIDTH // 2 - 75, HEIGHT - 80, 150, 40, 
-                         lambda: self.transition_to("menu"))
-        back_btn.draw(self.screen, button_font)
-        
-        # Draw instructions
-        instructions = info_font.render("Press ESC to return to menu", True, (200, 200, 255))
-        self.screen.blit(instructions, (WIDTH // 2 - instructions.get_width() // 2, HEIGHT - 30))
+        self.draw_back_button()
 
     def draw_settings(self):
         """Draw the settings screen."""
@@ -2055,6 +2182,12 @@ class Game:
 
     async def handle_state(self, events, dt):
         """Handle the current game state."""
+        # Check if player has been defeated but state hasn't changed
+        if hasattr(self, 'game_over_triggered') and self.game_over_triggered and self.current_state != "game_over":
+            # Force transition to game over if it's been triggered but not applied
+            if not self.fading_out and not self.fading_in:
+                self.current_state = "game_over"
+        
         # Handle state transitions
         if self.fading_out or self.fading_in:
             self.handle_transition()
@@ -2064,13 +2197,15 @@ class Game:
         if self.current_state == "menu":
             self.handle_menu(events, dt)
         elif self.current_state == "gameplay":
-              await self.handle_gameplay(events, dt)
+            await self.handle_gameplay(events, dt)
         elif self.current_state == "pause":
             self.handle_pause(events, dt)
         elif self.current_state == "settings":
             self.handle_settings(events, dt)
         elif self.current_state == "game_over":
             self.handle_game_over(events, dt)
+        elif self.current_state == "leaderboard":
+            self.handle_leaderboard(events, dt)
 
     def handle_menu(self, events, dt):
         """Handle the menu state."""
@@ -2265,17 +2400,39 @@ class Game:
                 self.transition_timer = 0
 
     def transition_to(self, state):
-        """Transition to a new game state."""
+        """Transition to a new game state with proper cleanup."""
         if state == self.current_state:
             return
+        
+        # Special handling when leaving game over screen
+        if self.current_state == "game_over" and state == "menu":
+            # Clean up any lingering game over resources
+            if hasattr(self, 'game_over_triggered'):
+                del self.game_over_triggered
+            if hasattr(self, 'score_submitted'):
+                del self.score_submitted
             
+            # Reset any active timers
+            if hasattr(self, 'game_over_event_id'):
+                pygame.time.set_timer(self.game_over_event_id, 0)
+            
+            # Clear gameplay elements that might still be around
+            self.enemies = []
+            self.resources = []
+            self.power_ups = []
+            self.effects_list = []
+        
+        # Store current and next states
         self.next_state = state
         self.previous_state = self.current_state
+        
+        # Prepare transition effect
         self.fading_out = True
         self.transition_timer = 0
         
-        # Play transition sound
-        self.effects.play_sound("menu_select")
+        # Play transition sound if not muted
+        if self.settings.get("sound_volume", 0.5) > 0:
+            self.effects.play_sound("menu_select")
 
 
     def update_setting(self, setting, value):
@@ -2310,15 +2467,50 @@ class Game:
             print(f"Error loading settings: {e}")
 
     def restart_game(self):
-        """Restart the game."""
+        """Restart the game with a clean state."""
+        # Clear game state flags
+        if hasattr(self, 'game_over_triggered'):
+            del self.game_over_triggered
+        if hasattr(self, 'score_submitted'):
+            del self.score_submitted
+        if hasattr(self, 'final_score'):
+            del self.final_score
+        if hasattr(self, 'final_time'):
+            del self.final_time
+        
+        # Reset core game metrics
         self.score = 0
         self.survival_time = 0
         self.wave_number = 0
+        
+        # Clear all gameplay elements
         self.enemies = []
         self.resources = []
         self.power_ups = []
+        self.projectiles = []
         self.effects_list = []
+        
+        # Clear camera effects
+        self.camera_offset_x = 0
+        self.camera_offset_y = 0
+        self.screen_shake_duration = 0
+        
+        # Reset transition state
+        self.fading_in = False
+        self.fading_out = False
+        self.transition_timer = 0
+        
+        # Reset crafting state
+        self.show_crafting = False
+        
+        # Reinitialize game world and player
+        self.initialize_game_world()
+        
+        # Transition to gameplay with a clean fade
         self.transition_to("gameplay")
+        
+        # Play game start sound
+        self.play_sound("menu_select")
 
     def initialize_game_world(self):
         """Initialize the game world and player."""
@@ -2649,10 +2841,10 @@ class Game:
 
     def spawn_power_up(self, x, y):
         """Spawn a power-up at the specified position."""
+        # Choose a random power-up type
         power_up_types = ["health", "energy", "shield", "damage"]
-        weights = [0.4, 0.3, 0.2, 0.1]  # Probability weights
+        weights = [40, 30, 20, 10]  # Adjusted weights (higher = more common)
         
-        # Choose random type
         power_up_type = random.choices(power_up_types, weights=weights, k=1)[0]
         
         # Create power-up
@@ -2667,7 +2859,27 @@ class Game:
             "duration": 30.0  # 30 seconds before disappearing
         }
         
+        # Add to power-ups list
         self.power_ups.append(power_up)
+        
+        # Record in database if authenticated
+        if self.auth_token and self.username:
+            try:
+                headers = {"Authorization": f"Bearer {self.auth_token}"}
+                data = {
+                    "type": f"powerup_{power_up_type}",
+                    "name": power_up_type,
+                    "x": int(x),
+                    "y": int(y),
+                    "value": 1
+                }
+                
+                # Send data to server asynchronously
+                asyncio.create_task(self.record_spawn_in_database(data, headers))
+            except Exception as e:
+                print(f"Error recording power-up spawn: {e}")
+        
+        return power_up
 
     def check_power_up_collection(self):
         """Check if player has collected power-ups."""
@@ -2685,6 +2897,17 @@ class Game:
                        (self.player.y - power_up["y"]) ** 2) ** 0.5
                 
                 if dist < collection_radius:
+                    # Mark as collected for database recording
+                    power_up["collected"] = True
+                    
+                    # Record in database before applying effect
+                    self.record_item_collection(
+                        item_type=f"powerup_{power_up['type']}",
+                        x=power_up["x"],
+                        y=power_up["y"],
+                        value=1
+                    )
+                    
                     # Apply power-up effect
                     self.apply_power_up(power_up)
                     
@@ -2749,128 +2972,82 @@ class Game:
         elif self.current_state == "pause":
             self.transition_to("gameplay")
 
-# Add these methods to your Game class for authentication
-
-    def load_auth_token(self):
-        """Load authentication token from file"""
-        try:
-            if os.path.exists("auth_token.json"):
-                with open("auth_token.json", "r") as f:
-                    auth_data = json.load(f)
-                    self.auth_token = auth_data.get("token")
-                    self.username = auth_data.get("username")
-                    print(f"Loaded auth token for user: {self.username}")
-                return True
-            return False
-        except Exception as e:
-            print(f"Error loading auth token: {e}")
-        return False
-
-
-    def initialize_game_world_with_auth(self):
-        """Initialize game world with authentication"""
-        # First try to load auth token
-        has_auth = self.load_auth_token()
-        
-        # Create world generator
-        self.world_generator = WorldGenerator(WIDTH, HEIGHT, TILE_SIZE)
-        
-        # Reset game metrics
-        self.score = 0
-        self.survival_time = 0
-        self.wave_number = 0
-   
-        # Clear game objects
+    def handle_game_over(self, events, dt):
+        """Handle game over state and send score to server"""
+        # Clear any remaining gameplay elements
+        if hasattr(self, 'player') and self.player:
+            self.player = None
         self.enemies = []
         self.resources = []
         self.power_ups = []
-        self.effects_list = []
-        self.other_players = {}
-    
-        # Load sprites
-        self.load_sprites()
-    
-        # Create player at center of screen
-        if not self.player_sprite_sheet:
-            # Create a placeholder sprite
-            player_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-            player_surface.fill((0, 200, 0))  # Green square
-            pygame.draw.circle(player_surface, (255, 255, 255), 
-                        (TILE_SIZE // 2, TILE_SIZE // 2), TILE_SIZE // 3)
-            self.player_sprite_sheet = player_surface
-    
-        #   Create player
-        self.player = Player(self.player_sprite_sheet, 
-                        WIDTH // 2 - TILE_SIZE // 2, 
-                        HEIGHT // 2 - TILE_SIZE // 2)
-    
-        # Initialize player attributes
-        self.player.health = 100
-        self.player.max_health = 100
-        self.player.energy = 100
-        self.player.max_energy = 100
-        self.player.is_dashing = False
-    
-        # Set player username if authenticated
-        if has_auth:
-            self.player.username = self.username
-            self.player.auth_token = self.auth_token
-    
-        # Initialize player inventory
-        self.player.inventory = {
-            "code_fragments": 0,
-            "energy_cores": 0,
-            "data_shards": 0
-        }
-    
-        # Start async task to connect to server
-        asyncio.create_task(self.player.initialize_server_connection())
-    
-        # Reset crafting menu state
-        self.show_crafting = False
-    
-        # Spawn initial resources
-        self.spawn_resources(10)
-    
-        # Start first wave
-        self.start_new_wave()
-
-    def handle_game_over(self, events, dt):
-        """Handle game over state and send score to server"""
-    # Draw background
+        self.projectiles = []
+        
+        # Draw solid background
+        self.screen.fill(BG_COLOR)
         self.draw_menu_background(dt)
-    
+        
         # Draw game over title
         title_text = self.font_xl.render("GAME OVER", True, NEON_RED)
         title_pos = (WIDTH // 2 - title_text.get_width() // 2, 150)
         self.screen.blit(title_text, title_pos)
-    
-        # Draw score
-        score_text = self.font_md.render(f"SCORE: {self.score}", True, WHITE)
+        
+        # Use final_score instead of score if available
+        display_score = getattr(self, 'final_score', self.score)
+        
+        # Draw score with shadow effect for better readability
+        score_text = self.font_lg.render(f"SCORE: {display_score}", True, WHITE)
+        score_shadow = self.font_lg.render(f"SCORE: {display_score}", True, (30, 30, 30))
+        score_shadow_pos = (WIDTH // 2 - score_shadow.get_width() // 2 + 2, 222)
         score_pos = (WIDTH // 2 - score_text.get_width() // 2, 220)
+        self.screen.blit(score_shadow, score_shadow_pos)
         self.screen.blit(score_text, score_pos)
-    
-        # Draw survival time
-        minutes = int(self.survival_time // 60)
-        seconds = int(self.survival_time % 60)
-        time_text = self.font_md.render(f"SURVIVAL TIME: {minutes:02d}:{seconds:02d}", 
-                                  True, WHITE)
+        
+        # Use final_time instead of survival_time if available
+        display_time = getattr(self, 'final_time', self.survival_time)
+        
+        # Draw survival time with shadow effect
+        minutes = int(display_time // 60)
+        seconds = int(display_time % 60)
+        time_text = self.font_lg.render(f"SURVIVAL TIME: {minutes:02d}:{seconds:02d}", True, WHITE)
+        time_shadow = self.font_lg.render(f"SURVIVAL TIME: {minutes:02d}:{seconds:02d}", True, (30, 30, 30))
+        time_shadow_pos = (WIDTH // 2 - time_shadow.get_width() // 2 + 2, 262)
         time_pos = (WIDTH // 2 - time_text.get_width() // 2, 260)
+        self.screen.blit(time_shadow, time_shadow_pos)
         self.screen.blit(time_text, time_pos)
-    
+        
+        # Ensure game over buttons exist and are properly initialized
+        if not hasattr(self, 'game_over_buttons') or not self.game_over_buttons:
+            button_width = 200
+            button_height = 50
+            button_x = WIDTH // 2 - button_width // 2
+            self.game_over_buttons = [
+                Button(button_x, 350, button_width, button_height, "PLAY AGAIN", self.restart_game),
+                Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
+                Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
+            ]
+        
+        # Draw instructions to ensure players know how to proceed
+        instruction_text = self.font_sm.render("Click a button or press ESC to return to menu", True, WHITE)
+        instruction_pos = (WIDTH // 2 - instruction_text.get_width() // 2, HEIGHT - 30)
+        self.screen.blit(instruction_text, instruction_pos)
+        
         # Update and draw buttons
         mouse_pos = pygame.mouse.get_pos()
         for button in self.game_over_buttons:
             button.update(mouse_pos)
             button.draw(self.screen, self.font_md)
-    
-        # Handle button events
+        
+        # Handle button clicks and keyboard events
         for event in events:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 for button in self.game_over_buttons:
                     if button.handle_event(event):
+                        self.play_sound("menu_select")  # Add sound feedback
                         break
-    
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                self.play_sound("menu_select")
+                self.transition_to("menu")
+        
         # If this is the first time processing game over, send score to server
         if not hasattr(self, 'score_submitted') or not self.score_submitted:
             if hasattr(self, 'auth_token') and self.auth_token:
@@ -2878,9 +3055,9 @@ class Game:
                 headers = {"Authorization": f"Bearer {self.auth_token}"}
                 try:
                     data = {
-                        "score": self.score,
+                        "score": display_score,
                         "wave_reached": self.wave_number,
-                        "survival_time": self.survival_time
+                        "survival_time": display_time
                     }
                     response = requests.post("http://localhost:8000/leaderboard/", 
                                         json=data, headers=headers)
@@ -2895,7 +3072,7 @@ class Game:
 
     def handle_player_defeat(self):
         """Handle player defeat logic and submit game session data"""
-        if not hasattr(self, 'game_over_triggered'):
+        if not hasattr(self, 'game_over_triggered') or not self.game_over_triggered:
             self.game_over_triggered = True
             
             # Play game over sound
@@ -2916,7 +3093,30 @@ class Game:
                     "timer": 0
                 })
         
-            # Add game over text effect
+            # Store final score and time before transitioning
+            self.final_score = self.score
+            self.final_time = self.survival_time
+        
+            # Create game over buttons - using direct callbacks instead of lambdas
+            button_width = 200
+            button_height = 50
+            button_x = WIDTH // 2 - button_width // 2
+            self.game_over_buttons = [
+                Button(button_x, 350, button_width, button_height, "PLAY AGAIN", self.restart_game),
+                Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
+                Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
+            ]
+            
+            # Remove player to prevent further updates
+            self.player = None
+            
+            # Immediately clear gameplay elements to avoid them being visible during transition
+            self.enemies = []
+            self.resources = []
+            self.power_ups = []
+            self.projectiles = []
+            
+            # Add "GAME OVER" text effect for display during the 3-second delay
             self.add_effect("text", WIDTH // 2, HEIGHT // 2, 
                           text="GAME OVER", 
                           color=(255, 0, 0), 
@@ -2930,19 +3130,52 @@ class Game:
                           size=40,
                           duration=3.0)
             
-            # Remove player to prevent further updates
-            self.player = None
-            
-            # Transition to game over state after delay
-            pygame.time.set_timer(pygame.USEREVENT, 3000)  # 3 second delay
-            pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.USEREVENT])
+            # Create a custom event to trigger the transition after delay
+            self.game_over_event_id = pygame.USEREVENT + 1  # Use a unique event ID
+            pygame.time.set_timer(self.game_over_event_id, 3000, loops=1)  # One-time event after 3 seconds
             
             # Schedule transition to game over state
             asyncio.create_task(self._transition_after_delay())
 
     async def _transition_after_delay(self):
+        """Force transition to game over screen after delay"""
         await asyncio.sleep(3)
-        self.transition_to("game_over")
+        
+        # Clear any pending transitions
+        self.fading_in = False
+        self.fading_out = False
+        self.transition_timer = 0
+        
+        # Clear ALL gameplay screen elements
+        self.enemies = []
+        self.resources = []
+        self.power_ups = []
+        self.projectiles = []
+        self.effects_list = []  # Clear all visual effects
+        
+        # Make sure we have the final score and time
+        if not hasattr(self, 'final_score'):
+            self.final_score = self.score
+        if not hasattr(self, 'final_time'):
+            self.final_time = self.survival_time
+        
+        # Force the game state to game_over - this is the important line
+        self.current_state = "game_over"
+        self.next_state = None  # Clear any pending state transitions
+        
+        # Ensure game over buttons exist and are properly initialized
+        button_width = 200
+        button_height = 50
+        button_x = WIDTH // 2 - button_width // 2
+        self.game_over_buttons = [
+            Button(button_x, 350, button_width, button_height, "PLAY AGAIN", self.restart_game),
+            Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
+            Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
+        ]
+        
+        # Refresh the screen immediately
+        self.handle_game_over([], 1/60)
+        pygame.display.flip()
 
     async def update_game_world(self, dt):
         """Update all game world elements."""
@@ -2985,6 +3218,195 @@ class Game:
             if current_time - last_update > max_idle_time:
                 print(f"Player {username} timed out (inactive)")
                 del self.other_players[username]
+
+    def handle_leaderboard(self, events, dt):
+        """Handle the leaderboard state."""
+        # Fetch leaderboard data if needed
+        if time.time() - self.leaderboard_last_update > 60:
+            self.fetch_leaderboard()
+        
+        # Draw leaderboard background
+        self.draw_leaderboard_background()
+        
+        # Draw leaderboard title
+        title_text = self.font_lg.render("LEADERBOARD", True, NEON_BLUE)
+        title_pos = (WIDTH // 2 - title_text.get_width() // 2, 50)
+        self.screen.blit(title_text, title_pos)
+        
+        # Update and draw leaderboard entries
+        self.draw_leaderboard_entries()
+        
+        # Draw back button
+        self.draw_back_button()
+        
+        # Handle events
+        for event in events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.transition_to("menu")
+                    return
+
+    def draw_leaderboard_background(self):
+        """Draw the leaderboard background."""
+        # Draw a dark background with grid pattern
+        background = pygame.Surface((WIDTH, HEIGHT))
+        background.fill((5, 10, 20))  # Dark blue
+        
+        # Add grid lines with perspective effect
+        vanishing_point_x = WIDTH // 2
+        vanishing_point_y = -100
+        
+        # Draw horizontal grid lines with perspective
+        for y in range(0, HEIGHT + 100, 40):
+            start_x_left = 0
+            start_x_right = WIDTH
+            end_x_left = (0 - vanishing_point_x) * (HEIGHT - y) / (HEIGHT - vanishing_point_y) + vanishing_point_x
+            end_x_right = (WIDTH - vanishing_point_x) * (HEIGHT - y) / (HEIGHT - vanishing_point_y) + vanishing_point_x
+            
+            # Draw only if within screen
+            if y < HEIGHT:
+                color = (0, 100, 255, int(100 * (1 - y / HEIGHT)))
+                pygame.draw.line(background, color, (start_x_left, y), (end_x_left, vanishing_point_y))
+                pygame.draw.line(background, color, (start_x_right, y), (end_x_right, vanishing_point_y))
+        
+        # Add vertical grid lines
+        for x in range(0, WIDTH, 80):
+            color = (0, 100, 255, int(100 * (1 - abs(x - WIDTH/2) / (WIDTH/2))))
+            pygame.draw.line(background, color, (x, 0), (x, HEIGHT))
+        
+        self.screen.blit(background, (0, 0))
+
+    def draw_leaderboard_entries(self):
+        """Draw the leaderboard entries."""
+        # Draw table headers
+        self.draw_table_headers()
+        
+        # Draw leaderboard entries
+        self.draw_entries()
+
+    def draw_table_headers(self):
+        """Draw the table headers."""
+        headers = ["RANK", "PLAYER", "SCORE", "TIME"]
+        header_positions = [80, 180, 480, 600]
+        
+        header_bg = pygame.Surface((WIDTH - 160, 40))
+        header_bg.fill((0, 50, 100))
+        header_bg.set_alpha(200)
+        self.screen.blit(header_bg, (80, 120))
+        
+        for i, header in enumerate(headers):
+            header_text = button_font.render(header, True, (150, 200, 255))
+            self.screen.blit(header_text, (header_positions[i], 125))
+        
+        # Draw glowing horizontal separator
+        pygame.draw.rect(self.screen, NEON_BLUE, (60, 170, WIDTH - 120, 3))
+        glow_surf = pygame.Surface((WIDTH - 100, 13), pygame.SRCALPHA)
+        pygame.draw.rect(glow_surf, (*NEON_BLUE, 50), (0, 0, WIDTH - 100, 13))
+        self.screen.blit(glow_surf, (50, 165))
+
+    def draw_entries(self):
+        """Draw the leaderboard entries."""
+        # Add the player's score if they've played
+        if hasattr(self, 'score') and self.score > 0:
+            player_entry = {"name": "YOU", "score": self.score, "time": int(self.survival_time)}
+            
+            # Insert at correct position
+            inserted = False
+            for i, entry in enumerate(self.leaderboard_entries):
+                if player_entry["score"] > entry["score"]:
+                    self.leaderboard_entries.insert(i, player_entry)
+                    inserted = True
+                    break
+            
+            if not inserted and len(self.leaderboard_entries) < 10:
+                self.leaderboard_entries.append(player_entry)
+            
+            # Keep only top 10
+            self.leaderboard_entries = self.leaderboard_entries[:10]
+        
+        # Draw entries with alternating row backgrounds
+        for i, entry in enumerate(self.leaderboard_entries):
+            y_pos = 180 + i * 40
+            
+            # Row background with alternating colors
+            row_bg = pygame.Surface((WIDTH - 160, 40))
+            if entry.get("name") == "YOU":
+                row_bg.fill((50, 0, 100))  # Highlight player's score
+            elif i % 2 == 0:
+                row_bg.fill((30, 30, 50))
+            else:
+                row_bg.fill((20, 20, 40))
+            row_bg.set_alpha(200)
+            self.screen.blit(row_bg, (80, y_pos))
+            
+            # Draw rank with medal for top 3
+            if i < 3:
+                medal_colors = [(255, 215, 0), (192, 192, 192), (205, 127, 50)]  # Gold, Silver, Bronze
+                pygame.draw.circle(self.screen, medal_colors[i], (80, y_pos + 20), 15)
+                rank_text = info_font.render(str(i+1), True, (0, 0, 0))
+                self.screen.blit(rank_text, (80 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
+            else:
+                rank_text = info_font.render(f"{i+1}", True, (255, 255, 255))
+                self.screen.blit(rank_text, (80 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
+            
+            # Draw player name
+            name_text = info_font.render(entry.get("name", "Unknown"), True, 
+                                       (255, 255, 0) if entry.get("name") == "YOU" else (255, 255, 255))
+            self.screen.blit(name_text, (180, y_pos + 12))
+            
+            # Draw score with formatting
+            score_text = info_font.render(f"{entry.get('score', 0):,}", True, (255, 255, 255))
+            self.screen.blit(score_text, (480, y_pos + 12))
+            
+            # Draw time with formatting
+            minutes = entry.get('time', 0) // 60
+            seconds = entry.get('time', 0) % 60
+            time_text = info_font.render(f"{minutes}m {seconds}s", True, (255, 255, 255))
+            self.screen.blit(time_text, (600, y_pos + 12))
+
+    def draw_back_button(self):
+        """Draw the back button."""
+        back_button = Button(WIDTH // 2 - 75, HEIGHT - 80, 150, 40, "BACK", lambda: self.transition_to("menu"))
+        mouse_pos = pygame.mouse.get_pos()
+        back_button.update(mouse_pos)
+        back_button.draw(self.screen, self.font_md)
+        
+        # Draw instructions
+        instructions = info_font.render("Press ESC to return to menu", True, (200, 200, 255))
+        self.screen.blit(instructions, (WIDTH // 2 - instructions.get_width() // 2, HEIGHT - 30))
+
+    def record_item_collection(self, item_type, x, y, value=1):
+        """Record collected item in the database"""
+        if not self.auth_token or not self.username:
+            print("Cannot record item collection: No authentication token")
+            return False
+        
+        try:
+            headers = {"Authorization": f"Bearer {self.auth_token}"}
+            data = {
+                "type": item_type,
+                "name": item_type,
+                "x": int(x),
+                "y": int(y),
+                "value": value
+            }
+            
+            # Send data to server
+            response = requests.post(
+                f"{self.server_url}/items/collect",
+                json=data,
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                print(f"Item collection recorded: {item_type} at ({x}, {y})")
+                return True
+            else:
+                print(f"Failed to record item collection: {response.status_code} - {response.text}")
+                return False
+        except Exception as e:
+            print(f"Error recording item collection: {e}")
+            return False
 
 class ChatSystem:
     def __init__(self, font, max_messages=5):
