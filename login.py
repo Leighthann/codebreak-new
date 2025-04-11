@@ -135,7 +135,16 @@ class Button:
 
 def login_or_register(username, password, mode="login"):
     """Function to login or register a user with the server"""
-    base_url = "http://127.0.0.1:8000"  # Ensure this matches your server URL
+    # Load server URL from configuration
+    try:
+        with open("server_config.json", "r") as f:
+            config = json.load(f)
+            base_url = config.get("server_url", "http://127.0.0.1:8000")
+    except (FileNotFoundError, json.JSONDecodeError):
+        base_url = "http://127.0.0.1:8000"  # Default fallback
+    
+    print(f"Using server: {base_url}")
+    
     max_retries = 10  # Increase number of retries
     retry_delay = 5  # Increase delay between retries in seconds
     

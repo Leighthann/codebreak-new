@@ -29,6 +29,7 @@ coverage/
 # Environment Files
 .env
 .env.local
+.pem
 
 # Additional dependency directories
 bower_components/

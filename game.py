@@ -426,8 +426,26 @@ class Menu:
 
 class Game:
     def __init__(self):
-        """Initialize the game state."""
+        # Initialize pygame
         pygame.init()
+        pygame.mixer.init()
+        
+        # Load server configuration
+        self.load_server_config()
+        
+        # Create screen
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("CodeBreak")
+        
+        # Initialize game state and event IDs
+        self.game_over_event_id = pygame.USEREVENT + 1
+        self.game_over_triggered = False
+        self.final_score = 0
+        self.final_time = 0
+        self.current_wave = 1
+        self.game_start_time = 0
+        
+        # Create screen
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         pygame.display.set_caption("CodeBreak")
         self.clock = pygame.time.Clock()
@@ -535,6 +553,18 @@ class Game:
         self.connection_attempts = 0
         self.session_id = None
         self.score_submitted = False
+    
+    def load_server_config(self):
+        """Load server URL from config file or use default."""
+        try:
+            with open("server_config.json", "r") as f:
+                config = json.load(f)
+                self.server_url = config.get("server_url", "http://127.0.0.1:8000")
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Default to localhost if config file not found or invalid
+            self.server_url = "http://127.0.0.1:8000"
+        
+        print(f"Using server: {self.server_url}")
     
     def load_auth_token(self):
         """Load authentication token from file if available."""
@@ -858,6 +888,13 @@ class Game:
         title_rect = title.get_rect(centerx=WIDTH//2, top=50)
         self.screen.blit(title, title_rect)
         
+        # Define energy costs for tools
+        tool_costs = {
+            "energy_sword": 20,
+            "data_shield": 25,
+            "hack_tool": 15
+        }
+        
         # Available recipes
         y_pos = 150
         for i, (item_name, recipe) in enumerate(self.player.crafting_recipes.items()):
@@ -877,6 +914,14 @@ class Game:
                     resource_text.append(self.font_sm.render(
                         f"{resource.replace('_', ' ').title()}: {has_amount}/{amount}",
                         True, color
+                    ))
+            
+            # Add energy requirement
+            energy_cost = tool_costs.get(item_name, 10)
+            energy_color = GREEN if self.player.energy >= energy_cost else YELLOW
+            resource_text.append(self.font_sm.render(
+                f"Energy to Use: {self.player.energy}/{energy_cost}",
+                True, energy_color
                     ))
             
             # Display resource requirements
@@ -1080,29 +1125,26 @@ class Game:
         print(f"Initial spawn complete. {self.enemies_to_spawn} enemies remaining")  # Debug print
 
     def spawn_wave_enemy(self):
-        """Spawn a single enemy for the current wave."""
-        if self.enemies_to_spawn <= 0:
-            return
+        """Spawn a new enemy for the current wave."""
+        margin = 50  # Margin from screen edges
         
-        # Always spawn at screen edge with proper margins
-        margin = 50  # Reduced margin to ensure enemies are visible
-        side = random.randint(0, 3)  # 0: top, 1: right, 2: bottom, 3: left
+        # Determine spawn position based on screen boundaries
+        edge = random.choice(["top", "right", "bottom", "left"])
         
-        if side == 0:  # Top
+        if edge == "top":
             x = random.randint(margin, WIDTH - margin)
-            y = margin  # Spawn just at the top edge
-        elif side == 1:  # Right
-            x = WIDTH - margin  # Spawn just at the right edge
+            y = margin
+        elif edge == "right":
+            x = WIDTH - margin
             y = random.randint(margin, HEIGHT - margin)
-        elif side == 2:  # Bottom
+        elif edge == "bottom":
             x = random.randint(margin, WIDTH - margin)
-            y = HEIGHT - margin  # Spawn just at the bottom edge
-        else:  # Left
-            x = margin  # Spawn just at the left edge
+            y = HEIGHT - margin
+        else:  # left
+            x = margin
             y = random.randint(margin, HEIGHT - margin)
         
-        # Create enemy
-        enemy = Enemy(self.enemy_sprite_sheet, x, y, server_url="http://127.0.0.1:8000")
+        enemy = Enemy(self.enemy_sprite_sheet, x, y, server_url=self.server_url)
         enemy.active = True
         
         # Scale stats based on wave
@@ -1114,11 +1156,11 @@ class Game:
         enemy.speed = int(2 * (1 + (self.wave_number - 1) * 0.05))
         
         # Initialize direction based on spawn position
-        if side == 0:
+        if edge == "top":
             enemy.direction = "down"
-        elif side == 1:
+        elif edge == "right":
             enemy.direction = "left"
-        elif side == 2:
+        elif edge == "bottom":
             enemy.direction = "up"
         else:
             enemy.direction = "right"
@@ -2566,8 +2608,11 @@ class Game:
         }
 
         def register_player(username):
-            url = "http://localhost:8000/register/user"  # Changed from /register/ to /register/user
-            response = requests.post(url, json={"username": username, "password": "default123"})  # Added password
+            """Register the player with the server."""
+            print(f"Registering player: {username}")
+            password = f"auto_{username}_{int(time.time())}"
+            url = f"{self.server_url}/register/user"  # Use server_url from config
+            response = requests.post(url, json={"username": username, "password": password})  # Added password
             try:
                 print(response.json())
             except:
@@ -3059,123 +3104,126 @@ class Game:
                         "wave_reached": self.wave_number,
                         "survival_time": display_time
                     }
-                    response = requests.post("http://localhost:8000/leaderboard/", 
-                                        json=data, headers=headers)
+                    print(f"Submitting final score: {data}")
+                    response = requests.post(f"{self.server_url}/leaderboard/", 
+                                        json=data, headers=headers, timeout=5)
                     if response.status_code == 200:
                         print("Score submitted successfully")
+                        self.add_effect("text", WIDTH // 2, 300, 
+                                text="Score submitted to leaderboard!", 
+                                color=GREEN, 
+                                size=20, 
+                                duration=3.0)
                     else:
-                        print(f"Failed to submit score: {response.text}")
+                        print(f"Failed to submit score: {response.status_code} - {response.text}")
+                        self.add_effect("text", WIDTH // 2, 300, 
+                                text="Failed to submit score to leaderboard", 
+                                color=RED, 
+                                size=20, 
+                                duration=3.0)
                 except Exception as e:
                     print(f"Error submitting score: {e}")
+                    self.add_effect("text", WIDTH // 2, 300, 
+                            text="Error connecting to leaderboard server", 
+                            color=RED, 
+                            size=20, 
+                            duration=3.0)
 
             self.score_submitted = True
 
     def handle_player_defeat(self):
-        """Handle player defeat logic and submit game session data"""
-        if not hasattr(self, 'game_over_triggered') or not self.game_over_triggered:
-            self.game_over_triggered = True
+        """Handle player defeat - submit score and show game over screen"""
+        # If we've already submitted the score, don't do it again
+        if hasattr(self, 'score_submitted') and self.score_submitted:
+            return
             
-            # Play game over sound
-            self.play_sound("game_over")
-        
-            # Create explosion particle effect
-            for _ in range(30):
-                angle = random.uniform(0, 2 * math.pi)
-                speed = random.uniform(2, 5)
-                self.effects_list.append({
-                    "type": "particle",
-                    "position": (self.player.x + self.player.width // 2, 
-                           self.player.y + self.player.height // 2) if self.player else (0, 0),
-                    "velocity": (math.cos(angle) * speed, math.sin(angle) * speed),
-                    "color": (255, 100, 50),
-                    "size": random.uniform(2, 6),
-                    "duration": random.randint(30, 60),
-                    "timer": 0
-                })
-        
-            # Store final score and time before transitioning
+        # Record the final score and stats
             self.final_score = self.score
             self.final_time = self.survival_time
+        self.final_wave = self.wave_number
         
-            # Create game over buttons - using direct callbacks instead of lambdas
-            button_width = 200
-            button_height = 50
-            button_x = WIDTH // 2 - button_width // 2
-            self.game_over_buttons = [
-                Button(button_x, 350, button_width, button_height, "PLAY AGAIN", self.restart_game),
-                Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
-                Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
-            ]
+        # Set the game over flag so state transition can be handled properly
+        self.game_over_triggered = True
+        
+        # Try to save collected items data locally if server connection fails
+        try:
+            # Save final stats locally in case server connection fails
+            defeat_data = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "score": self.final_score,
+                "time": self.final_time,
+                "wave": self.final_wave,
+                "username": self.username if hasattr(self, 'username') and self.username else "anonymous"
+            }
             
-            # Remove player to prevent further updates
-            self.player = None
+            # Create directory if it doesn't exist
+            if not os.path.exists("game_stats"):
+                os.makedirs("game_stats")
+                
+            # Append to local file
+            with open("game_stats/defeat_records.json", "a+") as f:
+                f.seek(0)  # Go to start of file
+                try:
+                    # Try to read existing content
+                    content = f.read().strip()
+                    data = json.loads(content) if content else []
+                except json.JSONDecodeError:
+                    # If file is empty or corrupted, start fresh
+                    data = []
+                
+                # Move to end for appending
+                f.seek(0, 2)
+                # If file is not empty and doesn't end with a comma, add one
+                if f.tell() > 2:
+                    f.write(",\n")
+                else:
+                    # If file is empty, start with bracket
+                    f.seek(0)
+                    f.write("[\n")
+                
+                # Write new entry
+                f.write(json.dumps(defeat_data, indent=2))
+                f.write("\n]")
+                
+            print(f"Saved defeat stats locally: {defeat_data}")
+        except Exception as e:
+            print(f"Error saving local defeat stats: {e}")
+        
+        # Submit score to leaderboard if authenticated
+        try:
+            print("Submitting score to leaderboard...")
+            headers = {"Authorization": f"Bearer {self.auth_token}"} if hasattr(self, 'auth_token') and self.auth_token else {}
             
-            # Immediately clear gameplay elements to avoid them being visible during transition
-            self.enemies = []
-            self.resources = []
-            self.power_ups = []
-            self.projectiles = []
-            
-            # Add "GAME OVER" text effect for display during the 3-second delay
-            self.add_effect("text", WIDTH // 2, HEIGHT // 2, 
-                          text="GAME OVER", 
-                          color=(255, 0, 0), 
-                          size=80,
-                          duration=3.0)
-            
-            # Add score text effect
-            self.add_effect("text", WIDTH // 2, HEIGHT // 2 + 80,
-                          text=f"SCORE: {self.score}",
-                          color=(255, 255, 255),
-                          size=40,
-                          duration=3.0)
-            
-            # Create a custom event to trigger the transition after delay
-            self.game_over_event_id = pygame.USEREVENT + 1  # Use a unique event ID
-            pygame.time.set_timer(self.game_over_event_id, 3000, loops=1)  # One-time event after 3 seconds
-            
-            # Schedule transition to game over state
-            asyncio.create_task(self._transition_after_delay())
+            # Only proceed if we have an auth token
+            if headers:
+                response = requests.post(f"{self.server_url}/leaderboard/",
+                                        json={
+                                            "score": self.final_score,
+                                            "wave_reached": self.final_wave,
+                                            "survival_time": self.final_time
+                                        },
+                                        headers=headers,
+                                        timeout=5)
+                
+                if response.status_code == 200:
+                    print("Score submitted successfully!")
+                    self.score_submitted = True
+                else:
+                    print(f"Failed to submit score: {response.status_code} - {response.text}")
+            else:
+                print("Not authenticated, skipping score submission")
+        except Exception as e:
+            print(f"Error submitting score: {e}")
 
-    async def _transition_after_delay(self):
-        """Force transition to game over screen after delay"""
-        await asyncio.sleep(3)
-        
-        # Clear any pending transitions
-        self.fading_in = False
-        self.fading_out = False
-        self.transition_timer = 0
-        
-        # Clear ALL gameplay screen elements
-        self.enemies = []
-        self.resources = []
-        self.power_ups = []
-        self.projectiles = []
-        self.effects_list = []  # Clear all visual effects
-        
-        # Make sure we have the final score and time
-        if not hasattr(self, 'final_score'):
-            self.final_score = self.score
-        if not hasattr(self, 'final_time'):
-            self.final_time = self.survival_time
-        
-        # Force the game state to game_over - this is the important line
-        self.current_state = "game_over"
-        self.next_state = None  # Clear any pending state transitions
-        
-        # Ensure game over buttons exist and are properly initialized
-        button_width = 200
-        button_height = 50
-        button_x = WIDTH // 2 - button_width // 2
-        self.game_over_buttons = [
-            Button(button_x, 350, button_width, button_height, "PLAY AGAIN", self.restart_game),
-            Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
-            Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
-        ]
-        
-        # Refresh the screen immediately
-        self.handle_game_over([], 1/60)
-        pygame.display.flip()
+        # Show visual feedback
+        self.add_effect("text", WIDTH // 2, HEIGHT // 2 - 100,
+                      text="GAME OVER",
+                      color=NEON_RED,
+                      size=50,
+                      duration=3.0)
+                      
+        # Schedule transition to game over screen
+        pygame.time.set_timer(self.game_over_event_id, 3000)  # 3 second delay
 
     async def update_game_world(self, dt):
         """Update all game world elements."""

@@ -12,8 +12,9 @@ import pygame
 
 class Player:
     def __init__(self, sprite_sheet, x, y, speed=5):
+        """Initialize the player."""
         # Position and movement
-        self.x = x                                  
+        self.x = x
         self.y = y
         self.speed = speed
         self.direction = "down"  # Default direction
@@ -27,6 +28,7 @@ class Player:
         self.energy = 100
         self.max_energy = 100
         self.shield = 0
+        self.score = 0  # Add score attribute
         
         # State
         self.attacking = False
@@ -60,7 +62,15 @@ class Player:
             "data_shards": 0
         }
         self.username = "Player1"  # Replace with a dynamic username input
-        self.server_url = "http://localhost:8000"
+        
+        # Try to load server_url from config
+        try:
+            with open("server_config.json", "r") as f:
+                config = json.load(f)
+                self.server_url = config.get("server_url", "http://localhost:8000")
+        except (FileNotFoundError, json.JSONDecodeError):
+            self.server_url = "http://localhost:8000"
+        
         self.ws = None
         self.connected = False
 
