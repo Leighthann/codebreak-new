@@ -27,9 +27,12 @@ def install_dependencies():
         "passlib[bcrypt]",
         "asyncpg",
         "python-dotenv",
-        "pyjwt"
-    ]
-    
+        "pyjwt",
+        "requests",
+        "psycopg2-binary",
+        "pygame",
+        "websockets"
+    ]    
     python_exe = sys.executable
     
     print("Checking internet connection...")
