@@ -134,8 +134,8 @@ async def record_game_session(session_data: dict, db: AsyncSession):
 async def spawn_item(item_data: dict, db: AsyncSession):
     """Spawn a new item in the game world"""
     query = """
-        INSERT INTO items (type, name, x, y, value, spawned_at)
-        VALUES (:type, :name, :x, :y, :value, NOW())
+        INSERT INTO items (username, type, name, x, y, value, spawned_at)
+        VALUES (:username, :type, :name, :x, :y, :value, NOW())
     """
     from sqlalchemy.sql import text
     await db.execute(text(query), item_data)

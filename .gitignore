@@ -29,7 +29,7 @@ coverage/
 # Environment Files
 .env
 .env.local
-.pem
+codebreak-key.pem
 
 # Additional dependency directories
 bower_components/

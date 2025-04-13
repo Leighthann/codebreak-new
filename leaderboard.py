@@ -75,7 +75,7 @@ class Button:
         return False
 
 class Leaderboard:
-    def __init__(self, server_url="http://127.0.0.1:8000"):
+    def __init__(self, server_url="http://127.0.0.1:8000/leaderboard"):
         self.server_url = server_url
         self.leaderboard_data = []
         self.player_username = None
@@ -95,12 +95,13 @@ class Leaderboard:
         """Load auth token from file if exists"""
         try:
             # First try the standard location
-            if os.path.exists("auth_token.json"):
+            '''if os.path.exists("auth_token.json"):
                 with open("auth_token.json", "r") as f:
                     auth_data = json.load(f)
                     self.auth_token = auth_data.get("token")
                     self.player_username = auth_data.get("username")
                     return
+            '''
                     
             # If not found, try the token folder
             if os.path.exists(TOKEN_FOLDER):

@@ -190,6 +190,8 @@ def start_client(token_file=None):
 def create_user(username, password):
     """Create a new user and return the token file path"""
     try:
+        print(f"Registering user: {username}")  # Log the username
+        print(f"Payload: {{'username': '{username}', 'password': '{password}'}}")  # Log the payload
         # Ensure token folder exists
         os.makedirs(TOKEN_FOLDER, exist_ok=True)
         

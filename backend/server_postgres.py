@@ -3,7 +3,7 @@ PostgreSQL-compatible server for CodeBreak application.
 This version uses direct psycopg2 connections for simplicity.
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Body
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
@@ -24,33 +24,45 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
-print(f"Current directory: {os.getcwd()}")
-print(f"Looking for .env at: {os.path.join(os.path.dirname(__file__), '.env')}")
-load_dotenv()  # Added override=True to ensure variables are loaded
+load_dotenv(override=True)  # Added override=True to ensure variables are loaded
 
 # Database connection parameters - using direct password from env for debugging
-#password = os.getenv("DB_PASSWORD", "")
-#print(f"Password loaded from env: {'*' * len(password) if password else 'NO PASSWORD FOUND'}")
+password = os.getenv("DB_PASSWORD", "L3igh-@Ann22")  # Default password for debugging
+print(f"Password loaded from env: {'*' * len(password) if password else 'NO PASSWORD FOUND'}")
 
 DB_PARAMS = {
     "database": os.getenv("DB_NAME", "codebreak_db"),
     "user": os.getenv("DB_USER", "postgres"),
-    "password": "L3igh-@Ann22",  # Temporarily hardcoded for testing
+    "password": password,  # Direct assignment from variable
     "host": os.getenv("DB_HOST", "localhost"),
     "port": int(os.getenv("DB_PORT", "5432"))
 }
 
-
-print("Attempting to connect with parameters:")
-safe_params = {k: v if k != "password" else "[HIDDEN]" for k, v in DB_PARAMS.items()}
-print(safe_params)
+#safe_params = {k: v if k != "password" else "[HIDDEN]" for k, v in DB_PARAMS.items()}
+safe_params = DB_PARAMS.copy()
 
 # Function to get database connection with hardcoded fallback
 def get_db_connection():
     """Create a new database connection"""
     try:
-        connection = psycopg2.connect(**DB_PARAMS)
-        return connection
+        # First try with parameters from environment
+        try:
+            connection = psycopg2.connect(**DB_PARAMS)
+            print("Connection successful with env parameters!")
+            return connection
+        except Exception as e:
+            print(f"First connection attempt failed: {e}")
+            print("Attempting to connect with parameters:")
+            print(safe_params)
+            
+            # If that fails, try with hardcoded password as last resort
+            hardcoded_params = DB_PARAMS.copy()
+            hardcoded_params["password"] = "L3igh-@Ann22"  # Temporary for debugging
+            print("Trying with hardcoded password as fallback...")
+            connection = psycopg2.connect(**hardcoded_params)
+            print("Connection successful with hardcoded password!")
+            return connection
+            
     except Exception as e:
         logger.error(f"Database connection error: {e}")
         raise HTTPException(status_code=500, detail="Database connection error")
@@ -281,411 +293,6 @@ async def get_player_info(username: str):
         logger.error(f"Error retrieving player: {e}")
         raise HTTPException(status_code=500, detail="Error retrieving player")
 
-# New routes added below
-@app.get("/players/me")
-async def get_current_player_info(current_user = Depends(get_current_user)):
-    """Get the current authenticated player's info"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cursor.execute("SELECT * FROM players WHERE username = %s", (current_user["username"],))
-        player = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        if not player:
-            raise HTTPException(status_code=404, detail="Player not found")
-        
-        return dict(player)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving player: {e}")
-        raise HTTPException(status_code=500, detail="Error retrieving player")
-
-@app.put("/players/position")
-async def update_position(x: int, y: int, current_user = Depends(get_current_user)):
-    """Update player position (requires authentication)"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE players SET x = %s, y = %s, last_login = %s WHERE username = %s",
-            (x, y, datetime.now(), current_user["username"])
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return {"status": "success", "message": "Position updated"}
-    except Exception as e:
-        logger.error(f"Error updating position: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update position")
-
-@app.get("/leaderboard")
-async def get_leaderboard(limit: int = 10):
-    """Get the global leaderboard"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cursor.execute(
-            "SELECT username, score, last_login FROM players ORDER BY score DESC LIMIT %s",
-            (limit,)
-        )
-        leaderboard = [dict(row) for row in cursor.fetchall()]
-        cursor.close()
-        conn.close()
-        
-        return {"leaderboard": leaderboard}
-    except Exception as e:
-        logger.error(f"Error retrieving leaderboard: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve leaderboard")
-
-@app.post("/leaderboard")
-async def submit_leaderboard_score(
-    score: int, 
-    wave_reached: int = 0, 
-    survival_time: float = 0,
-    current_user = Depends(get_current_user)
-):
-    """Submit a new score to the leaderboard (requires authentication)"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Insert into leaderboard table
-        cursor.execute(
-            """
-            INSERT INTO leaderboard (username, score, wave_reached, survival_time, date)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (current_user["username"], score, wave_reached, survival_time, datetime.now())
-        )
-        
-        # Update player's best score if this one is higher
-        cursor.execute(
-            """
-            UPDATE players SET 
-                score = GREATEST(score, %s),
-                last_login = %s
-            WHERE username = %s
-            """,
-            (score, datetime.now(), current_user["username"])
-        )
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return {"status": "success", "message": "Score submitted successfully"}
-    except Exception as e:
-        logger.error(f"Error submitting leaderboard score: {e}")
-        raise HTTPException(status_code=500, detail="Failed to submit score")
-
-# Game session model
-class GameSession(BaseModel):
-    session_id: Optional[str] = None
-    username: str
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    score: int = 0
-    enemies_defeated: int = 0
-    waves_completed: int = 0
-
-@app.post("/game-sessions")
-async def start_game_session(current_user = Depends(get_current_user)):
-    """Start a new game session (requires authentication)"""
-    try:
-        session_id = str(uuid.uuid4())
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            INSERT INTO game_sessions (session_id, username, start_time, score, enemies_defeated, waves_completed)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (session_id, current_user["username"], datetime.now(), 0, 0, 0)
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return {"status": "success", "session_id": session_id}
-    except Exception as e:
-        logger.error(f"Error starting game session: {e}")
-        raise HTTPException(status_code=500, detail="Failed to start game session")
-
-@app.put("/game-sessions/{session_id}")
-async def end_game_session(
-    session_id: str, 
-    score: int, 
-    enemies_defeated: int, 
-    waves_completed: int,
-    current_user = Depends(get_current_user)
-):
-    """End a game session and record results (requires authentication)"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
-        # Verify session exists and belongs to the user
-        cursor.execute(
-            "SELECT * FROM game_sessions WHERE session_id = %s",
-            (session_id,)
-        )
-        session = cursor.fetchone()
-        
-        if not session:
-            cursor.close()
-            conn.close()
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        if session["username"] != current_user["username"]:
-            cursor.close()
-            conn.close()
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Cannot modify another player's session"
-            )
-        
-        # Update session
-        cursor.execute(
-            """
-            UPDATE game_sessions SET 
-                end_time = %s, 
-                score = %s, 
-                enemies_defeated = %s, 
-                waves_completed = %s 
-            WHERE session_id = %s
-            """,
-            (datetime.now(), score, enemies_defeated, waves_completed, session_id)
-        )
-        
-        # Update player's score if this score is higher
-        cursor.execute(
-            """
-            UPDATE players SET 
-                score = GREATEST(score, %s),
-                last_login = %s
-            WHERE username = %s
-            """,
-            (score, datetime.now(), current_user["username"])
-        )
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return {"status": "success", "message": "Game session completed"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error ending game session: {e}")
-        raise HTTPException(status_code=500, detail="Failed to end game session")
-
-@app.get("/players/{username}/stats")
-async def get_player_stats(username: str):
-    """Get player statistics including game session history"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
-        # Get player data
-        cursor.execute("SELECT * FROM players WHERE username = %s", (username,))
-        player = cursor.fetchone()
-        
-        if not player:
-            cursor.close()
-            conn.close()
-            raise HTTPException(status_code=404, detail="Player not found")
-        
-        # Get player stats from game sessions
-        cursor.execute(
-            """
-            SELECT 
-                COUNT(*) as total_sessions,
-                MAX(score) as highest_score,
-                SUM(enemies_defeated) as total_enemies_defeated,
-                MAX(waves_completed) as highest_wave
-            FROM game_sessions 
-            WHERE username = %s AND end_time IS NOT NULL
-            """,
-            (username,)
-        )
-        stats = cursor.fetchone()
-        
-        # Get recent sessions
-        cursor.execute(
-            """
-            SELECT session_id, start_time, end_time, score, enemies_defeated, waves_completed
-            FROM game_sessions
-            WHERE username = %s AND end_time IS NOT NULL
-            ORDER BY start_time DESC
-            LIMIT 5
-            """,
-            (username,)
-        )
-        recent_sessions = [dict(row) for row in cursor.fetchall()]
-        
-        cursor.close()
-        conn.close()
-        
-        return {
-            "player": dict(player),
-            "stats": dict(stats) if stats else {},
-            "recent_sessions": recent_sessions
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving player stats: {e}")
-        raise HTTPException(status_code=500, detail="Error retrieving player stats")
-
-@app.put("/players/{username}/inventory")
-async def update_inventory(
-    username: str,
-    item_type: str,
-    quantity: int = 1,
-    current_user = Depends(get_current_user)
-):
-    """Update player inventory (add or remove items)"""
-    if current_user["username"] != username:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot modify another player's inventory"
-        )
-    
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        
-        # Get current inventory
-        cursor.execute("SELECT inventory FROM players WHERE username = %s", (username,))
-        player = cursor.fetchone()
-        
-        if not player:
-            cursor.close()
-            conn.close()
-            raise HTTPException(status_code=404, detail="Player not found")
-        
-        # Update inventory
-        inventory = player["inventory"]
-        if item_type not in inventory:
-            inventory[item_type] = 0
-        
-        inventory[item_type] += quantity
-        if inventory[item_type] < 0:
-            inventory[item_type] = 0
-        
-        # Save updated inventory
-        cursor.execute(
-            "UPDATE players SET inventory = %s WHERE username = %s",
-            (json.dumps(inventory), username)
-        )
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return {
-            "status": "success",
-            "message": f"Inventory updated",
-            "inventory": inventory
-        }
-    except Exception as e:
-        logger.error(f"Error updating inventory: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update inventory")
-
-@app.post("/items/collect")
-async def record_item_collection(
-    type: str = Body(...), 
-    name: str = Body(...), 
-    x: int = Body(...), 
-    y: int = Body(...), 
-    value: int = Body(1),
-    current_user = Depends(get_current_user)
-):
-    """Record a collected item in the items table"""
-    try:
-        username = current_user["username"]
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Insert into items table
-        cursor.execute("""
-            INSERT INTO items (type, name, x, y, value, username, collected_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            type, name, x, y, value, username, datetime.now()
-        ))
-        
-        # If it's a resource, also update player inventory
-        if type in ["code_fragments", "energy_cores", "data_shards"]:
-            # First get current inventory
-            cursor.execute(
-                "SELECT inventory FROM players WHERE username = %s",
-                (username,)
-            )
-            player_data = cursor.fetchone()
-            
-            if player_data:
-                inventory = player_data[0] if isinstance(player_data[0], dict) else json.loads(player_data[0])
-                
-                # Update inventory count
-                if type not in inventory:
-                    inventory[type] = 0
-                inventory[type] += value
-                
-                # Save updated inventory
-                cursor.execute(
-                    "UPDATE players SET inventory = %s WHERE username = %s",
-                    (json.dumps(inventory), username)
-                )
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return {"success": True, "message": f"Item collected: {type}"}
-    except Exception as e:
-        logger.error(f"Error recording item collection: {e}")
-        raise HTTPException(status_code=500, detail=f"Error recording item: {str(e)}")
-
-@app.post("/items/spawn")
-async def record_item_spawn(
-    type: str = Body(...), 
-    name: str = Body(...), 
-    x: int = Body(...), 
-    y: int = Body(...), 
-    value: int = Body(1),
-    current_user = Depends(get_current_user)
-):
-    """Record a spawned item in the items table"""
-    try:
-        username = current_user["username"]
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Insert into items table
-        cursor.execute("""
-            INSERT INTO items (type, name, x, y, value, username, spawned_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """, (
-            type, name, x, y, value, username, datetime.now()
-        ))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return {"success": True, "message": f"Item spawn recorded: {type}"}
-    except Exception as e:
-        logger.error(f"Error recording item spawn: {e}")
-        raise HTTPException(status_code=500, detail=f"Error recording item spawn: {str(e)}")
-
 # More routes can be added here...
 
 @app.websocket("/ws/{username}")
@@ -734,7 +341,6 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                     if "x" in data and "y" in data:
                         x = data["x"]
                         y = data["y"]
-                        direction = data.get("direction", "down")  # Get direction with default
                         
                         # Update in database
                         conn = get_db_connection()
@@ -751,8 +357,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                         await manager.broadcast({
                             "event": "player_moved",
                             "username": username,
-                            "position": {"x": x, "y": y},
-                            "direction": direction
+                            "position": {"x": x, "y": y}
                         }, exclude=username)
                 
                 elif action == "chat_message":
@@ -763,29 +368,6 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                             "message": data["message"],
                             "timestamp": datetime.now().isoformat()
                         })
-                
-                elif action == "get_all_players":
-                    # Get all active players from database
-                    try:
-                        conn = get_db_connection()
-                        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-                        # Get players who have logged in within the last hour
-                        cursor.execute(
-                            "SELECT username, x, y FROM players WHERE last_login > NOW() - INTERVAL '1 hour'"
-                        )
-                        all_players = cursor.fetchall()
-                        cursor.close()
-                        conn.close()
-                        
-                        # Send player list to the requesting client
-                        players_list = [{"username": p["username"], "x": p["x"], "y": p["y"]} for p in all_players]
-                        await websocket.send_json({
-                            "event": "all_players",
-                            "players": players_list
-                        })
-                        logger.info(f"Sent list of {len(players_list)} players to {username}")
-                    except Exception as e:
-                        logger.error(f"Error fetching all players: {e}")
                 
                 # Add other action handlers as needed
     
