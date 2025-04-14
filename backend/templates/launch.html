@@ -65,6 +65,15 @@
         .download-btn:hover {
             background-color: #cc2080;
         }
+        .note-text {
+            margin-top: 30px;
+            font-size: 14px;
+        }
+
+        .note-text {
+            margin-top: 30px;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -73,12 +82,12 @@
         <p>Hello, <strong>{{ username }}</strong>! You're now logged in.</p>
         <p>Click the button below to launch the game.</p>
         
-        <a href="codebreak://{{ token }}/{{ username }}" class="launch-btn">Launch Game</a>
-        
-        <p style="margin-top: 30px;">If you don't have the game installed yet:</p>
-        <a href="/download-client" class="download-btn">Download Game</a>
-        
-        <p style="margin-top: 30px; font-size: 14px;">
+        <p class="note-text">
+            Note: If clicking "Launch Game" doesn't work, make sure you've installed 
+            the game client and completed the setup process.
+        </p>
+        </p>
+        <p class="note-text">
             Note: If clicking "Launch Game" doesn't work, make sure you've installed 
             the game client and completed the setup process.
         </p>

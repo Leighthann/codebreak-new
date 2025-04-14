@@ -97,6 +97,10 @@
         .download-btn:hover {
             background-color: #cc2080;
         }
+
+        .hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -120,11 +124,11 @@
                     <input type="password" id="password" name="password" required>
                 </div>
                 
-                <button type="submit">Login</button>
+        <div id="register-form" class="hidden">
             </form>
         </div>
         
-        <div id="register-form" style="display: none;">
+        <div id="register-form" class="hidden">
             <form action="/web-register" method="post">
                 <div class="form-group">
                     <label for="new-username">Username</label>
