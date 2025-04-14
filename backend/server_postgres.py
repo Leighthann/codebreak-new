@@ -506,6 +506,65 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(username)
 
+# Game client download endpoint
+@app.get("/download-client")
+async def download_client():
+    """Provide a downloadable game client package"""
+    # Define the path to the client package
+    client_package_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "client", "codebreak_client.zip")
+    
+    # Check if the client package exists
+    if not os.path.exists(client_package_path):
+        # Return a temporary HTML response if the package doesn't exist
+        return HTMLResponse("""
+        <html>
+            <head>
+                <title>CodeBreak Download</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        background-color: #0a0a19;
+                        color: white;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        height: 100vh;
+                        margin: 0;
+                    }
+                    .container {
+                        background-color: rgba(0,0,0,0.7);
+                        padding: 40px;
+                        border-radius: 10px;
+                        box-shadow: 0 0 20px rgba(0, 195, 255, 0.5);
+                        max-width: 600px;
+                        text-align: center;
+                    }
+                    h1 { color: #00c3ff; }
+                    a {
+                        color: #00c3ff;
+                        text-decoration: none;
+                    }
+                    a:hover { text-decoration: underline; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <h1>Game Client Not Available</h1>
+                    <p>The game client package is currently being prepared.</p>
+                    <p>Please check back later or contact the game administrator.</p>
+                    <p><a href="/login">Return to Login</a></p>
+                </div>
+            </body>
+        </html>
+        """)
+    
+    # If the client package exists, serve it as a downloadable file
+    return FileResponse(
+        path=client_package_path,
+        filename="codebreak_client.zip",
+        media_type="application/zip"
+    )
+
 if __name__ == "__main__":
     import uvicorn
     # Use 0.0.0.0 to listen on all network interfaces
