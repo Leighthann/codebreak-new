@@ -70,7 +70,12 @@ app.add_middleware(
 )
 
 # Mount static files directory
-app.mount("/static", StaticFiles(directory="backend\\static"), name="static")
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
+    name="static"
+)
+
 
 # Password Hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
