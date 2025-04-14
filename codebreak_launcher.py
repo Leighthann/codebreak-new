@@ -126,6 +126,7 @@ def log_server_output():
 def start_client(token_file=None):
     """Start a game client with an optional token file"""
     python_exe = sys.executable
+    game_process = None  # Initialize this variable
     
     # If a token file is specified, copy it to auth_token.json
     if token_file:
@@ -178,7 +179,7 @@ def start_client(token_file=None):
             time.sleep(1)
             
             # Verify the process started
-            if game_process.poll() is not None:
+            if game_process and game_process.poll() is not None:
                 print("Warning: Game process may have terminated immediately")
                 return False
             
