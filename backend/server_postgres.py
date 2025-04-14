@@ -26,8 +26,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Set up templates
-templates = Jinja2Templates(directory="backend/templates")
+# Set up templates with absolute path to fix directory issues
+templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 
 # Load environment variables
 load_dotenv(override=True)
