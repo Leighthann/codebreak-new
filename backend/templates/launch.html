@@ -69,28 +69,43 @@
             margin-top: 30px;
             font-size: 14px;
         }
-
-        .note-text {
-            margin-top: 30px;
-            font-size: 14px;
+        
+        .info-section {
+            margin-top: 40px;
+            padding: 15px;
+            background-color: rgba(0, 195, 255, 0.1);
+            border-radius: 5px;
+            text-align: left;
+        }
+        
+        .info-section h3 {
+            color: #00c3ff;
+            margin-top: 0;
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="container">/a>
         <h1>LAUNCH CODEBREAK</h1>
         <p>Hello, <strong>{{ username }}</strong>! You're now logged in.</p>
         <p>Click the button below to launch the game.</p>
         
-        <a href="codebreak://{{ token }}/{{ username }}" class="launch-btn">Launch Game</a>
+        <a href="/play-game?token={{ token }}&username={{ username }}" class="launch-btn">Launch Game</a>
         
         <p style="margin-top: 30px;">If you don't have the game installed yet:</p>
-        <a href="/download-client" class="download-btn">Download Game</a>
+        <a href="/codebreak_client.zip/" class="download-btn">Download Game</a>
         
         <p class="note-text">
             Note: If clicking "Launch Game" doesn't work, make sure you've installed 
             the game client and completed the setup process.
         </p>
+        
+        <div class="info-section">
+            <h3>Account Information</h3>
+            <p>Your login and registration credentials are securely stored in our database server.</p>
+            <p>Username and encrypted password are maintained in our user authentication system.</p>
+            <p>For security purposes, passwords are hashed and never stored as plain text.</p>
+        </div>
     </div>
 </body>
 </html>

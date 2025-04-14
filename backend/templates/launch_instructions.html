@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Launch CodeBreak</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #0a0a19;
+            color: #fff;
+            text-align: center;
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .container {
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
+            padding: 40px;
+            box-shadow: 0 0 20px rgba(0, 195, 255, 0.5);
+            max-width: 800px;
+        }
+        h1 {
+            color: #00c3ff;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px rgba(0, 195, 255, 0.5);
+        }
+        p {
+            margin-bottom: 20px;
+        }
+        .download-btn {
+            background-color: #00c3ff;
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            margin-top: 20px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .download-btn:hover {
+            background-color: #00a0cc;
+        }
+        .note-text {
+            margin-top: 30px;
+            font-size: 14px;
+        }
+        .code-block {
+            background-color: rgba(0, 0, 0, 0.5);
+            border-radius: 5px;
+            padding: 15px;
+            text-align: left;
+            max-width: 100%;
+            overflow-x: auto;
+            font-family: monospace;
+            margin: 20px 0;
+        }
+        .steps {
+            text-align: left;
+            margin: 20px 0;
+        }
+        .steps ol {
+            margin-left: 30px;
+        }
+        .steps li {
+            margin-bottom: 10px;
+        }
+        .info-section {
+            margin-top: 40px;
+            padding: 15px;
+            background-color: rgba(0, 195, 255, 0.1);
+            border-radius: 5px;
+            text-align: left;
+        }
+        
+        .info-section h3 {
+            color: #00c3ff;
+            margin-top: 0;
+        }
+        
+        .copy-btn {
+            background-color: #333;
+            color: #fff;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        
+        .copy-btn:hover {
+            background-color: #444;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LAUNCH CODEBREAK</h1>
+        <p>Hello, <strong>{{ username }}</strong>! You're authenticated and ready to play.</p>
+        
+        <div class="steps">
+            <h3>How to Launch the Game:</h3>
+            <ol>
+                <li>Save the configuration below as <code>client_config.json</code> in the same directory as main.py</li>
+                <li>Open a terminal or command prompt</li>
+                <li>Navigate to the game directory</li>
+                <li>Run <code>python main.py</code></li>
+            </ol>
+        </div>
+        
+        <h3>Your Configuration:</h3>
+        <div class="code-block">
+            <pre id="config-text">{{ config_json }}</pre>
+            <button class="copy-btn" onclick="copyConfig()">Copy to Clipboard</button>
+        </div>
+        
+        <a href="/download-client" class="download-btn">Download Game Client</a>
+        
+        <p class="note-text">
+            Note: The game uses Python with Pygame. Make sure you have Python 3.7+ and Pygame installed.
+        </p>
+        
+        <div class="info-section">
+            <h3>Account Information</h3>
+            <p>Your login and registration credentials are securely stored in our PostgreSQL database server.</p>
+            <p>Username and encrypted password are maintained in our user authentication system.</p>
+            <p>For security purposes, passwords are hashed using BCrypt and never stored as plain text.</p>
+            <p>Game data is synchronized in real-time using WebSocket connections to: {{ server_url }}</p>
+        </div>
+    </div>
+    
+    <script>
+        function copyConfig() {
+            const configText = document.getElementById('config-text').textContent;
+            navigator.clipboard.writeText(configText).then(function() {
+                alert('Configuration copied to clipboard!');
+            }, function(err) {
+                console.error('Could not copy text: ', err);
+                alert('Failed to copy. Please select and copy the text manually.');
+            });
+        }
+    </script>
+</body>
+</html>
