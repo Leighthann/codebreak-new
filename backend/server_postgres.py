@@ -26,8 +26,15 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Set up templates with absolute path to fix directory issues
-templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
+# Set up templates with absolute path that works on both Windows and Linux
+templates_dir = os.path.join(os.path.dirname(__file__), "templates")
+templates = Jinja2Templates(directory=templates_dir)
+
+# Print template path for debugging
+logger.info(f"Templates directory set to: {templates_dir}")
+logger.info(f"Templates directory exists: {os.path.exists(templates_dir)}")
+if os.path.exists(templates_dir):
+    logger.info(f"Templates found: {os.listdir(templates_dir)}")
 
 # Load environment variables
 load_dotenv(override=True)
