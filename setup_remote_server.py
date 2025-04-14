@@ -52,7 +52,7 @@ def setup_remote_server():
     
     # Load current configuration
     current_config = load_server_config()
-    current_url = current_config.get("server_url", "http://127.0.0.1:8000")
+    current_url = current_config.get("server_url", "http://3.130.249.194:8000")
     
     print(f"Current server URL: {current_url}\n")
     
@@ -64,6 +64,8 @@ def setup_remote_server():
     # Make sure URL has correct format
     if not new_url.startswith("http://") and not new_url.startswith("https://"):
         new_url = "http://" + new_url
+    if not ':' in new_url.split('/')[-1]:
+        new_url = new_url.rstrip('/') + ':8000'
     
     # Test connection
     if test_server_connection(new_url):

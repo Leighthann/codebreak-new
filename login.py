@@ -139,9 +139,9 @@ def login_or_register(username, password, mode="login"):
     try:
         with open("server_config.json", "r") as f:
             config = json.load(f)
-            base_url = config.get("server_url", "http://127.0.0.1:8000")
+            base_url = config.get("server_url", "http://3.130.249.194:8000")
     except (FileNotFoundError, json.JSONDecodeError):
-        base_url = "http://127.0.0.1:8000"  # Default fallback
+        base_url = "http://3.130.249.194:8000"  # Default fallback
     
     print(f"Using server: {base_url}")
     

@@ -3,7 +3,7 @@ import os
 
 # Default server configuration
 DEFAULT_CONFIG = {
-    "server_url": "http://127.0.0.1:8000"
+    "server_url": "http://3.130.249.194:8000"
 }
 
 def load_server_config():

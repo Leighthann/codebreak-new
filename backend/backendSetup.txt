@@ -1,0 +1,173 @@
+# Setting Up Your Remote Server on AWS
+
+## 1. Create an AWS Account
+1. Go to [aws.amazon.com](https://aws.amazon.com/)
+2. Click "Create an AWS Account"
+3. Follow the sign-up process (requires email, password, and credit card)
+
+## 2. Launch an EC2 Instance
+1. Log in to the AWS Management Console
+2. Go to EC2 service (search "EC2" in the search bar)
+3. Click "Launch Instance"
+4. Configure your instance:
+   - *Name*: CodeBreak-Server
+   - *OS Image*: Ubuntu Server 22.04 LTS (free tier eligible)
+   - *Instance Type*: t2.micro (free tier eligible)
+   - *Key Pair*: Create a new key pair
+     - Name it "codebreak-key"
+     - Download the .pem file (keep this secure!)
+   - *Network Settings*: 
+     - Allow SSH traffic from anywhere
+     - Allow HTTP and HTTPS traffic
+     - Create a new security group
+   - Add a custom TCP rule for port 8000
+
+5. Click "Launch Instance"
+
+## 3. Connect to Your Instance
+1. Wait for the instance to initialize (Status: "Running")
+2. Select your instance and click "Connect"
+3. Choose "SSH Client" tab for instructions
+
+4. On Windows:
+   - Open PowerShell or Windows Terminal
+   - Navigate to where your key pair file is stored
+   - Run: chmod 400 codebreak-key.pem (if using Git Bash)
+   - Connect: ssh -i "codebreak-key.pem" ubuntu@your-ec2-public-dns
+   - ssh -i "codebreak-key.pem" ubuntu@ec2-3-148-175-112.us-east-2.compute.amazonaws.com
+   
+   On Mac/Linux:
+   - Open Terminal
+   - Run: chmod 400 codebreak-key.pem
+   - Connect: ssh -i "codebreak-key.pem" ubuntu@your-ec2-public-dns
+
+## 4. Set Up Your Server
+1. Update system packages:
+   
+   sudo apt update && sudo apt upgrade -y
+   
+
+2. Install required dependencies:
+   
+   sudo apt install -y python3-pip python3-venv postgresql postgresql-contrib git
+   
+
+3. Clone your repository:
+   
+   git clone https://github.com/yourusername/codebreak.git
+   cd codebreak
+   
+
+4. Set up Python virtual environment:
+   
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   
+
+## 5. Configure PostgreSQL
+1. Start PostgreSQL:
+   
+   sudo systemctl start postgresql
+   sudo systemctl enable postgresql
+   
+
+2. Create a database and user:
+   
+   sudo -u postgres psql
+   
+
+3. In PostgreSQL prompt:
+   sql
+   CREATE DATABASE codebreak_db;
+   CREATE USER codebreak_user WITH ENCRYPTED PASSWORD 'your_secure_password';
+   GRANT ALL PRIVILEGES ON DATABASE codebreak_db TO codebreak_user;
+   \q
+   
+
+4. Create a .env file in the backend directory:
+   
+   cd backend
+   nano .env
+   
+
+5. Add your configuration:
+   
+   DB_NAME=codebreak_db
+   DB_USER=codebreak_user
+   DB_PASSWORD=your_secure_password
+   DB_HOST=localhost
+   DB_PORT=5432
+   SECRET_KEY=your_secure_random_key
+   
+
+## 6. Run Your Server
+1. Start the API server:
+   
+   cd backend
+   uvicorn server_postgres:app --host 0.0.0.0 --port 8000
+   
+
+2. For persistent running, set up a systemd service:
+   
+   sudo nano /etc/systemd/system/codebreak.service
+   
+
+3. Add the following content:
+   
+        [Unit]
+Description=CodeBreak Game Server
+After=network.target postgresql.service
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/codebreak-new/backend
+Environment="PATH=/home/ubuntu/codebreak-new/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+Environment="PYTHONPATH=/home/ubuntu/codebreak-new"
+ExecStart=/home/ubuntu/codebreak-new/venv/bin/python -m uvicorn server_postgres:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+   
+
+4. Enable and start the service:
+   
+   # Reload systemd to recognize changes
+sudo systemctl daemon-reload
+
+# Stop the existing service
+sudo systemctl stop codebreak
+
+sudo systemctl enable codebreak
+
+# Start the service again
+sudo systemctl start codebreak
+
+# Check the status
+sudo systemctl status codebreak
+
+## 7. Configure Clients to Use Your Server
+1. Get your server's public IP:
+   
+   curl http://checkip.amazonaws.com
+   
+
+2. On each client, run:
+   
+   python setup_remote_server.py
+   
+
+3. Enter your AWS EC2 public IP with port:
+   
+   http://your-ec2-public-ip:8000
+   http://3.148.175.112:8000
+   
+
+## 8. Security Considerations
+1. Restrict security group rules to only necessary traffic
+2. Keep your SSH key secure
+3. Consider setting up HTTPS using Let's Encrypt
+4. Use a strong password for PostgreSQL

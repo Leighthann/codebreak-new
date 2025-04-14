@@ -67,9 +67,9 @@ class Player:
         try:
             with open("server_config.json", "r") as f:
                 config = json.load(f)
-                self.server_url = config.get("server_url", "http://localhost:8000")
+                self.server_url = config.get("server_url", "http://3.130.249.194:8000")
         except (FileNotFoundError, json.JSONDecodeError):
-            self.server_url = "http://localhost:8000"
+            self.server_url = "http://3.130.249.194:8000"
         
         self.ws = None
         self.connected = False

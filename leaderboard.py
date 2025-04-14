@@ -75,7 +75,7 @@ class Button:
         return False
 
 class Leaderboard:
-    def __init__(self, server_url="http://127.0.0.1:8000/leaderboard"):
+    def __init__(self, server_url="http://3.130.249.194:8000/leaderboard"):
         self.server_url = server_url
         self.leaderboard_data = []
         self.player_username = None

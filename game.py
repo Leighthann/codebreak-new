@@ -478,7 +478,7 @@ class Game:
         self.leaderboard = None
         
         # Server connection
-        self.server_url = "http://127.0.0.1:8000"
+        self.server_url = "http://3.130.249.194:8000"
         self.auth_token = None
         self.username = None
         self.load_auth_token()
@@ -559,10 +559,10 @@ class Game:
         try:
             with open("server_config.json", "r") as f:
                 config = json.load(f)
-                self.server_url = config.get("server_url", "http://127.0.0.1:8000")
+                self.server_url = config.get("server_url", "http://3.130.249.194:8000")
         except (FileNotFoundError, json.JSONDecodeError):
             # Default to localhost if config file not found or invalid
-            self.server_url = "http://127.0.0.1:8000"
+            self.server_url = "http://3.130.249.194:8000"
         
         print(f"Using server: {self.server_url}")
     

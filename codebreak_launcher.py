@@ -89,7 +89,7 @@ def start_server():
             time.sleep(2)
             
             try:
-                response = requests.get("http://127.0.0.1:8000/")
+                response = requests.get("http://3.130.249.194:8000/")
                 if response.status_code == 200:
                     print("Server started successfully.")
                     return True
@@ -190,14 +190,27 @@ def start_client(token_file=None):
 def create_user(username, password):
     """Create a new user and return the token file path"""
     try:
-        print(f"Registering user: {username}")  # Log the username
-        print(f"Payload: {{'username': '{username}', 'password': '{password}'}}")  # Log the payload
+       
         # Ensure token folder exists
         os.makedirs(TOKEN_FOLDER, exist_ok=True)
+
+        server_url = "http://3.130.249.194:8000"
+        if os.path.exists("client_config.json"):
+            with open("client_config.json", "r") as f:
+                config = json.load(f)
+                server_url = config.get("server_url", server_url)
         
-        # Register user
+        print(f"Using server: {server_url}")
+        print(f"Registering user: {username}")
+        print(f"Payload: {{'username': '{username}', 'password': '{password}'}}")  # Log the payload
+        
+        # # Register user
+        # register_response = requests.post(
+        #     "http://3.130.249.194:8000/register/user", 
+        #     json={"username": username, "password": password}
+        # )
         register_response = requests.post(
-            "http://127.0.0.1:8000/register/user", 
+            f"{server_url}/register", 
             json={"username": username, "password": password}
         )
         
@@ -210,7 +223,7 @@ def create_user(username, password):
         
         # Login and get token
         login_response = requests.post(
-            "http://127.0.0.1:8000/token", 
+            "http://3.130.249.194:8000/token", 
             data={"username": username, "password": password}
         )
         
@@ -392,7 +405,7 @@ def main():
         # Create client config
         if not os.path.exists("client_config.json"):
             with open("client_config.json", "w") as f:
-                f.write('{"server_url": "http://127.0.0.1:8000"}')
+                f.write('{"server_url": "http://3.130.249.194:8000"}')
         
         # Choose mode
         if args.token:
