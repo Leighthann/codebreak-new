@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeBreak - Login</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #0a0a19;
+            color: #fff;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .container {
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
+            padding: 40px;
+            box-shadow: 0 0 20px rgba(0, 195, 255, 0.5);
+            width: 360px;
+        }
+        h1 {
+            color: #00c3ff;
+            margin-bottom: 30px;
+            text-shadow: 0 0 10px rgba(0, 195, 255, 0.5);
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 2px solid #333;
+        }
+        .tab.active {
+            border-bottom: 2px solid #00c3ff;
+            color: #00c3ff;
+        }
+        form {
+            text-align: left;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #00c3ff;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            background-color: #111;
+            border: 1px solid #333;
+            color: #fff;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #00c3ff;
+            color: #000;
+            border: none;
+            padding: 12px;
+            width: 100%;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #00a0cc;
+        }
+        .message {
+            margin-top: 20px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .error {
+            background-color: rgba(255, 0, 0, 0.2);
+            color: #ff5555;
+        }
+        .success {
+            background-color: rgba(0, 255, 0, 0.2);
+            color: #55ff55;
+        }
+        .download-btn {
+            background-color: #ff299d;
+            margin-top: 20px;
+        }
+        .download-btn:hover {
+            background-color: #cc2080;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>CODEBREAK</h1>
+        
+        <div class="tabs">
+            <div class="tab active" id="login-tab" onclick="showTab('login')">Login</div>
+            <div class="tab" id="register-tab" onclick="showTab('register')">Register</div>
+        </div>
+        
+        <div id="login-form">
+            <form action="/web-login" method="post">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                
+                <button type="submit">Login</button>
+            </form>
+        </div>
+        
+        <div id="register-form" style="display: none;">
+            <form action="/web-register" method="post">
+                <div class="form-group">
+                    <label for="new-username">Username</label>
+                    <input type="text" id="new-username" name="username" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="new-password">Password</label>
+                    <input type="password" id="new-password" name="password" required>
+                </div>
+                
+                <button type="submit">Register</button>
+            </form>
+        </div>
+        
+        {% if message %}
+        <div class="message {% if error %}error{% else %}success{% endif %}">
+            {{ message }}
+        </div>
+        {% endif %}
+        
+        <a href="/download-client"><button class="download-btn">Download Game</button></a>
+    </div>
+
+    <script>
+        function showTab(tab) {
+            if (tab === 'login') {
+                document.getElementById('login-form').style.display = 'block';
+                document.getElementById('register-form').style.display = 'none';
+                document.getElementById('login-tab').classList.add('active');
+                document.getElementById('register-tab').classList.remove('active');
+            } else {
+                document.getElementById('login-form').style.display = 'none';
+                document.getElementById('register-form').style.display = 'block';
+                document.getElementById('login-tab').classList.remove('active');
+                document.getElementById('register-tab').classList.add('active');
+            }
+        }
+    </script>
+</body>
+</html>

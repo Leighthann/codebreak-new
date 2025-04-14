@@ -8,6 +8,9 @@ import argparse
 import socket
 import requests
 import signal
+import urllib.parse
+import argparse
+import winreg
 
 # Global variables
 server_process = None
@@ -373,6 +376,9 @@ def main():
     parser.add_argument("--client-only", action="store_true", help="Start only the client (login)")
     parser.add_argument("--token", help="Use a specific token file from the loginTokens folder")
     parser.add_argument("--list-tokens", action="store_true", help="List all available tokens")
+    parser = argparse.ArgumentParser(description="CodeBreak Game Launcher")
+    parser.add_argument("--web-token", help="Web login token URL")
+    parser.add_argument("--register", action="store_true", help="Register protocol handler")
     args = parser.parse_args()
     
     try:
@@ -459,6 +465,70 @@ def main():
     except Exception as e:
         print(f"An error occurred: {e}")
         handle_shutdown()
+
+def register_protocol_handler():
+    """Register the codebreak:// protocol handler"""
+    if not sys.platform.startswith('win'):
+        print("Protocol handler registration only supported on Windows")
+        return False
+    
+    try:
+        # Get the full path to this script
+        script_path = os.path.abspath(__file__)
+        
+        # Registry keys
+        protocol_key = r"SOFTWARE\Classes\codebreak"
+        command_key = r"SOFTWARE\Classes\codebreak\shell\open\command"
+        
+        # Create the protocol key
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, protocol_key) as key:
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:CodeBreak Protocol")
+            winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
+        
+        # Create the command key
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, command_key) as key:
+            command = f'"{sys.executable}" "{script_path}" --web-token "%1"'
+            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, command)
+        
+        print("Protocol handler registered successfully")
+        return True
+    except Exception as e:
+        print(f"Failed to register protocol handler: {e}")
+        return False
+
+def handle_web_token(token_url):
+    """Handle web login token URL"""
+    try:
+        # Parse the URL (format: codebreak://TOKEN/USERNAME)
+        parsed = urllib.parse.urlparse(token_url)
+        
+        # Remove the protocol part
+        full_path = parsed.netloc + parsed.path
+        parts = full_path.split('/')
+        
+        # Get token and username
+        token = parts[0]
+        username = parts[1] if len(parts) > 1 else "Player"
+        
+        print(f"Received web token for user: {username}")
+        
+        # Save token to file
+        with open("auth_token.json", "w") as f:
+            json.dump({
+                "username": username,
+                "token": token,
+                "token_type": "bearer",
+                "web_login": True
+            }, f)
+        
+        # Launch the game
+        subprocess.Popen([sys.executable, "main.py"])
+        return True
+    except Exception as e:
+        print(f"Error handling web token: {e}")
+        return False
+
+
 
 if __name__ == "__main__":
     main() 

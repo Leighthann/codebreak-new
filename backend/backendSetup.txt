@@ -163,7 +163,7 @@ sudo systemctl status codebreak
 3. Enter your AWS EC2 public IP with port:
    
    http://your-ec2-public-ip:8000
-   http://3.148.175.112:8000
+   http://3.130.249.194:8000
    
 
 ## 8. Security Considerations

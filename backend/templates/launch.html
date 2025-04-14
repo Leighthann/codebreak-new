@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Launch CodeBreak</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #0a0a19;
+            color: #fff;
+            text-align: center;
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .container {
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
+            padding: 40px;
+            box-shadow: 0 0 20px rgba(0, 195, 255, 0.5);
+            max-width: 600px;
+        }
+        h1 {
+            color: #00c3ff;
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px rgba(0, 195, 255, 0.5);
+        }
+        p {
+            margin-bottom: 20px;
+        }
+        .launch-btn {
+            background-color: #00c3ff;
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            margin-top: 20px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .launch-btn:hover {
+            background-color: #00a0cc;
+        }
+        .download-btn {
+            background-color: #ff299d;
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 16px;
+            margin-top: 20px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .download-btn:hover {
+            background-color: #cc2080;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>LAUNCH CODEBREAK</h1>
+        <p>Hello, <strong>{{ username }}</strong>! You're now logged in.</p>
+        <p>Click the button below to launch the game.</p>
+        
+        <a href="codebreak://{{ token }}/{{ username }}" class="launch-btn">Launch Game</a>
+        
+        <p style="margin-top: 30px;">If you don't have the game installed yet:</p>
+        <a href="/download-client" class="download-btn">Download Game</a>
+        
+        <p style="margin-top: 30px; font-size: 14px;">
+            Note: If clicking "Launch Game" doesn't work, make sure you've installed 
+            the game client and completed the setup process.
+        </p>
+    </div>
+</body>
+</html>

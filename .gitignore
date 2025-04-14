@@ -30,6 +30,7 @@ coverage/
 .env
 .env.local
 codebreak-key.pem
+nano.ssh
 
 # Additional dependency directories
 bower_components/
