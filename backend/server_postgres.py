@@ -508,4 +508,6 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="http://3.130.249.194", port=8000)
+    # Use 0.0.0.0 to listen on all network interfaces
+    # This allows external connections to your server
+    uvicorn.run(app, host="0.0.0.0", port=8000)
