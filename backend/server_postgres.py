@@ -6,7 +6,7 @@ This version uses direct psycopg2 connections for simplicity.
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -365,6 +365,98 @@ async def play_game(request: Request, token: str, username: str):
         })
 
 # More routes can be added here...
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, message: Optional[str] = None):
+    """Render the login page"""
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "message": message
+    })
+
+@app.post("/web-login")
+async def web_login(request: Request):
+    """Handle web form-based login"""
+    try:
+        form_data = await request.form()
+        username = form_data.get("username")
+        password = form_data.get("password")
+        
+        # Log the login attempt for debugging
+        logger.info(f"Web login attempt for user: {username}")
+        
+        # Verify credentials
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor.execute("SELECT * FROM users WHERE username = %s", (username,))
+        user = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if not user:
+            logger.warning(f"Login failed: User {username} not found")
+            return RedirectResponse(url=f"/login?message=Invalid+username+or+password", status_code=303)
+        
+        # Verify password
+        if not password or not verify_password(str(password), user["hashed_password"]):
+            logger.warning(f"Login failed: Incorrect password for {username}")
+            return RedirectResponse(url=f"/login?message=Invalid+username+or+password", status_code=303)
+        
+        # Generate token
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": username}, expires_delta=access_token_expires
+        )
+        
+        # Successful login - redirect to launch page with token
+        logger.info(f"Web login successful for user: {username}")
+        return templates.TemplateResponse("launch.html", {
+            "request": request,
+            "username": username,
+            "token": access_token
+        })
+    
+    except Exception as e:
+        logger.error(f"Web login error: {str(e)}")
+        return RedirectResponse(url=f"/login?message=An+error+occurred", status_code=303)
+
+# Optional: Registration page endpoint
+@app.get("/register", response_class=HTMLResponse)
+async def register_page(request: Request, message: Optional[str] = None):
+    """Render the registration page"""
+    return templates.TemplateResponse("register.html", {
+        "request": request,
+        "message": message
+    })
+
+@app.post("/web-register")
+async def web_register(request: Request):
+    """Handle web form-based registration"""
+    try:
+        form_data = await request.form()
+        username = form_data.get("username")
+        password = form_data.get("password")
+        confirm_password = form_data.get("confirm_password")
+        
+        # Validate input
+        if not username or not password:
+            return RedirectResponse(url="/register?message=Username+and+password+required", status_code=303)
+            
+        if password != confirm_password:
+            return RedirectResponse(url="/register?message=Passwords+do+not+match", status_code=303)
+        
+        # Create user using existing function
+        user_data = UserCreate(username=str(username), password=str(password))
+        try:
+            await register_user(user_data)
+            # Registration successful, redirect to login
+            return RedirectResponse(url="/login?message=Registration+successful+Please+login", status_code=303)
+        except HTTPException as e:
+            return RedirectResponse(url=f"/register?message={e.detail}", status_code=303)
+            
+    except Exception as e:
+        logger.error(f"Web registration error: {str(e)}")
+        return RedirectResponse(url="/register?message=Registration+failed", status_code=303)
 
 @app.websocket("/ws/{username}")
 async def websocket_endpoint(websocket: WebSocket, username: str, token: Optional[str] = None):
