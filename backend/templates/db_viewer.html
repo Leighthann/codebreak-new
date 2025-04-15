@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeBreak - Database Viewer</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #0a0a19;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #ff0000;
+            text-shadow: 0 0 5px rgba(255, 0, 0, 0.5);
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+        .back-button {
+            background-color: #333;
+            color: #fff;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .back-button:hover {
+            background-color: #444;
+        }
+        .table-section {
+            background-color: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            overflow: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 10px;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+        th {
+            background-color: rgba(255, 0, 0, 0.2);
+            color: #ff5555;
+        }
+        tr:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        .password-field {
+            color: #888;
+            font-style: italic;
+        }
+        .timestamp {
+            font-size: 0.8em;
+            color: #888;
+        }
+        .refresh-btn {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        .refresh-btn:hover {
+            background-color: #0056b3;
+        }
+        .json-data {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .json-data:hover {
+            white-space: normal;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>CodeBreak Database Viewer</h1>
+            <div>
+                <a href="/admin" class="back-button">Logout</a>
+                <button onclick="window.location.reload()" class="refresh-btn">Refresh Data</button>
+            </div>
+        </div>
+        
+        <div class="table-section">
+            <h2>Users Table</h2>
+            <table>
+                <thead>
+                    <tr>
+                        {% for column in users_columns %}
+                        <th>{{ column }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in users_data %}
+                    <tr>
+                        {% for i in range(users_columns|length) %}
+                            {% if users_columns[i] == 'hashed_password' %}
+                                <td class="password-field">[HIDDEN]</td>
+                            {% elif users_columns[i] == 'created_at' %}
+                                <td class="timestamp">{{ row[i] }}</td>
+                            {% else %}
+                                <td>{{ row[i] }}</td>
+                            {% endif %}
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="table-section">
+            <h2>Players Table</h2>
+            <table>
+                <thead>
+                    <tr>
+                        {% for column in players_columns %}
+                        <th>{{ column }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in players_data %}
+                    <tr>
+                        {% for i in range(players_columns|length) %}
+                            {% if players_columns[i] == 'inventory' %}
+                                <td class="json-data">{{ row[i] }}</td>
+                            {% elif players_columns[i] in ['created_at', 'last_login'] %}
+                                <td class="timestamp">{{ row[i] }}</td>
+                            {% else %}
+                                <td>{{ row[i] }}</td>
+                            {% endif %}
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

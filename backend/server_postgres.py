@@ -544,6 +544,104 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(username)
 
+# After the web-register endpoint, add these database viewer endpoints
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_login(request: Request, message: Optional[str] = None):
+    """Admin login page"""
+    return templates.TemplateResponse("admin_login.html", {
+        "request": request,
+        "message": message
+    })
+
+@app.post("/admin-login")
+async def process_admin_login(request: Request):
+    """Process admin login"""
+    try:
+        form_data = await request.form()
+        username = form_data.get("username")
+        password = form_data.get("password")
+        
+        # Very simple admin authentication - consider using a more secure method
+        if username == "admin" and password == "L3igh-@Ann22":
+            return RedirectResponse(url="/db-viewer", status_code=303)
+        else:
+            return RedirectResponse(url="/admin?message=Invalid+credentials", status_code=303)
+    except Exception as e:
+        logger.error(f"Admin login error: {str(e)}")
+        return RedirectResponse(url="/admin?message=Error+logging+in", status_code=303)
+
+@app.get("/db-viewer", response_class=HTMLResponse)
+async def db_viewer(request: Request):
+    """Database viewer page"""
+    try:
+        # Get list of tables
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            ORDER BY table_name
+        """)
+        tables = [row[0] for row in cursor.fetchall()]
+        
+        # Get data from users table
+        cursor.execute("SELECT * FROM users")
+        users_data = cursor.fetchall()
+        users_columns = [desc[0] for desc in cursor.description]
+        
+        # Get data from players table
+        cursor.execute("SELECT * FROM players")
+        players_data = cursor.fetchall()
+        players_columns = [desc[0] for desc in cursor.description]
+        
+        cursor.close()
+        conn.close()
+        
+        return templates.TemplateResponse("db_viewer.html", {
+            "request": request,
+            "tables": tables,
+            "users_data": users_data,
+            "users_columns": users_columns,
+            "players_data": players_data,
+            "players_columns": players_columns
+        })
+    except Exception as e:
+        logger.error(f"DB viewer error: {str(e)}")
+        return templates.TemplateResponse("error.html", {
+            "request": request,
+            "message": f"Database error: {str(e)}"
+        })
+
+@app.get("/api/db/{table_name}")
+async def get_table_data(table_name: str, current_user = Depends(get_current_user)):
+    """API endpoint to get table data"""
+    try:
+        # Basic SQL injection protection
+        allowed_tables = ["users", "players"]
+        if table_name not in allowed_tables:
+            raise HTTPException(status_code=400, detail="Invalid table name")
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cursor.execute(f"SELECT * FROM {table_name}")
+        rows = cursor.fetchall()
+        result = [dict(row) for row in rows]
+        
+        # Mask sensitive data
+        if table_name == "users":
+            for row in result:
+                if "hashed_password" in row:
+                    row["hashed_password"] = "[HIDDEN]"
+        
+        cursor.close()
+        conn.close()
+        return result
+    except Exception as e:
+        logger.error(f"API db error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
