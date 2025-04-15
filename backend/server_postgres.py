@@ -9,6 +9,9 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+import shutil
+import os
 from pydantic import BaseModel
 from typing import Dict, Optional, List
 import json
@@ -641,6 +644,42 @@ async def get_table_data(table_name: str, current_user = Depends(get_current_use
     except Exception as e:
         logger.error(f"API db error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+# After the other route handlers, add this endpoint for client download
+@app.get("/download-client")
+async def download_client():
+    """Serve the client zip file for download"""
+    try:
+        # Define source and target paths
+        download_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "download_client")
+        temp_zip_path = os.path.join(os.path.dirname(__file__), "codebreak_client.zip")
+        
+        # Check if the download_client directory exists
+        if not os.path.exists(download_dir):
+            logger.error(f"Client directory not found at: {download_dir}")
+            raise HTTPException(status_code=404, detail="Game client not available")
+        
+        # Create a zip file from the download_client directory
+        shutil.make_archive(
+            os.path.join(os.path.dirname(__file__), "codebreak_client"),
+            'zip', 
+            download_dir
+        )
+        
+        # Check if the zip was created
+        if not os.path.exists(temp_zip_path):
+            logger.error("Failed to create client zip file")
+            raise HTTPException(status_code=500, detail="Failed to prepare download")
+        
+        # Return the file as a downloadable response
+        return FileResponse(
+            path=temp_zip_path, 
+            filename="codebreak_client.zip",
+            media_type="application/zip"
+        )
+    except Exception as e:
+        logger.error(f"Error serving client download: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Download error: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
