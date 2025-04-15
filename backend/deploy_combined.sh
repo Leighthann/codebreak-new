@@ -116,12 +116,6 @@ run_ssh_command "cd $REMOTE_DIR && git pull origin sub-branch && echo '>>> [3] P
 # Activate virtual environment and install dependencies
 run_ssh_command "cd $REMOTE_DIR && source venv/bin/activate && pip install -r backend/requirements.txt && echo '>>> [4-5] Virtual environment activated and dependencies installed'"
 
-# Install WebSocket dependencies
-run_ssh_command "cd $REMOTE_DIR && source venv/bin/activate && pip install websockets python-socketio && echo '>>> [6] WebSocket dependencies installed'"
-
-# Update service configuration
-run_ssh_command "sudo sed -i 's/ExecStart=.*/ExecStart=\/home\/ubuntu\/codebreak-new\/venv\/bin\/python -m uvicorn server_postgres:app --host 0.0.0.0 --port 8000 --ws-ping-interval 20 --ws-ping-timeout 30/' /etc/systemd/system/codebreak.service && sudo systemctl daemon-reload && echo '>>> [7] Service configuration updated'"
-
 # Restart and check service
 run_ssh_command "sudo systemctl start codebreak && echo '>>> [8] CodeBreak service restarted'"
 run_ssh_command "sudo systemctl status codebreak && echo '>>> [9] Service status checked'"
