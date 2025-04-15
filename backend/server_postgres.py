@@ -651,7 +651,7 @@ async def download_client():
     """Serve the client zip file for download"""
     try:
         # Define source and target paths
-        download_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "download_client")
+        download_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "download-client")
         temp_zip_path = os.path.join(os.path.dirname(__file__), "codebreak_client.zip")
         
         # Check if the download_client directory exists
