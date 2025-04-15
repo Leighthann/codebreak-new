@@ -567,15 +567,26 @@ class Game:
         print(f"Using server: {self.server_url}")
     
     def load_auth_token(self):
-        """Load authentication token from file if available."""
+        """Load authentication token from client_config.json"""
         try:
-            with open("auth_token.json", "r") as f:
-                auth_data = json.load(f)
-                self.auth_token = auth_data.get("token")
-                self.username = auth_data.get("username")
-                print(f"Loaded auth token for user: {self.username}")
+            # Only load from client_config.json since it has everything we need
+            if os.path.exists("client_config.json"):
+                with open("client_config.json", "r") as f:
+                    config = json.load(f)
+                    if config.get("token") and config.get("username"):
+                        print(f"Using credentials from client_config.json for: {config.get('username')}")
+                        self.auth_token = config.get("token")
+                        self.username = config.get("username")
+                        # Make sure to use the server_url from config
+                        if config.get("server_url"):
+                            self.server_url = config.get("server_url")
+                        return
+                    else:
+                        print("Warning: client_config.json exists but is missing token or username")
+            else:
+                print("Warning: client_config.json not found")
         except Exception as e:
-            print(f"Could not load auth token: {e}")
+            print(f"Error loading client_config.json: {e}")
     
     def fetch_leaderboard(self):
         """Fetch leaderboard data from server"""

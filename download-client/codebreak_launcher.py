@@ -8,9 +8,6 @@ import argparse
 import socket
 import requests
 import signal
-import urllib.parse
-import argparse
-import winreg
 
 # Global variables
 server_process = None
@@ -126,186 +123,60 @@ def log_server_output():
                 
         time.sleep(0.1)
 
-def start_client(token_file=None):
-    """Start a game client with an optional token file"""
+def start_client():
+    """Start a game client using credentials from client_config.json"""
     python_exe = sys.executable
     game_process = None  # Initialize this variable
     
-    # If a token file is specified, copy it to auth_token.json
-    if token_file:
-        # If token is just a name, assume it's in the token folder
-        if not os.path.dirname(token_file):
-            full_token_path = os.path.join(TOKEN_FOLDER, token_file)
-            if os.path.exists(full_token_path):
-                token_file = full_token_path
-                
-        if os.path.exists(token_file) and token_file != "auth_token.json":
-            import shutil
-            try:
-                # Make a backup of existing auth_token.json if it exists
-                if os.path.exists("auth_token.json"):
-                    shutil.copy("auth_token.json", "auth_token_backup.json")
-                    print("Backed up existing auth_token.json")
-                
-                # Copy the new token file
-                shutil.copy(token_file, "auth_token.json")
-                print(f"Using credentials from {token_file}")
-            except Exception as e:
-                print(f"Error copying token file: {e}")
-                return False
-    
-    try:
-        # Start with login page if no token is provided
-        if not token_file:
-            print("Starting login page...")
-            # Use wait=True for Windows to ensure window opens properly
-            if sys.platform.startswith('win'):
-                process = subprocess.Popen([python_exe, "login.py"])
-                print(f"Login process started with PID: {process.pid}")
-            else:
-                subprocess.Popen([python_exe, "login.py"])
-        else:
-            # Start the game directly if token is provided
-            print("Starting game client with direct launch...")
-            if sys.platform.startswith('win'):
-                # For Windows, use a more direct approach
-                game_process = subprocess.Popen(
-                    [python_exe, "main.py"], 
-                    creationflags=subprocess.CREATE_NEW_CONSOLE
-                )
-                print(f"Game process started with PID: {game_process.pid}")
-            else:
-                # For non-Windows
-                subprocess.Popen([python_exe, "game.py"])
-            
-            # Wait a moment to ensure process starts
-            time.sleep(1)
-            
-            # Verify the process started
-            if game_process and game_process.poll() is not None:
-                print("Warning: Game process may have terminated immediately")
-                return False
-            
-        return True
-    except Exception as e:
-        print(f"Error starting client: {e}")
-        return False
-
-def create_user(username, password):
-    """Create a new user and return the token file path"""
-    try:
-       
-        # Ensure token folder exists
-        os.makedirs(TOKEN_FOLDER, exist_ok=True)
-
-        server_url = "http://3.130.249.194:8000"
-        if os.path.exists("client_config.json"):
-            with open("client_config.json", "r") as f:
+    # Check if client_config.json exists with credentials
+    config_path = "client_config.json"
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r") as f:
                 config = json.load(f)
-                server_url = config.get("server_url", server_url)
-        
-        print(f"Using server: {server_url}")
-        print(f"Registering user: {username}")
-        print(f"Payload: {{'username': '{username}', 'password': '{password}'}}")  # Log the payload
-        
-        # # Register user
-        # register_response = requests.post(
-        #     "http://3.130.249.194:8000/register/user", 
-        #     json={"username": username, "password": password}
-        # )
-        register_response = requests.post(
-            f"{server_url}/register", 
-            json={"username": username, "password": password}
-        )
-        
-        if register_response.status_code != 200:
-            if "Username already registered" in register_response.text:
-                print(f"User {username} already exists, trying to log in.")
-            else:
-                print(f"Failed to register user: {register_response.text}")
-                return None
-        
-        # Login and get token
-        login_response = requests.post(
-            "http://3.130.249.194:8000/token", 
-            data={"username": username, "password": password}
-        )
-        
-        if login_response.status_code == 200:
-            token_data = login_response.json()
-            token_filename = f"{username}_token.json"
-            token_file = os.path.join(TOKEN_FOLDER, token_filename)
-            
-            with open(token_file, "w") as f:
-                json.dump({
-                    "username": username,
-                    "password": password,
-                    "token": token_data["access_token"],
-                    "token_type": token_data["token_type"]
-                }, f)
-            
-            print(f"Created token file for {username}: {token_file}")
-            return token_file
-        else:
-            print(f"Failed to get token: {login_response.text}")
-            return None
-    except Exception as e:
-        print(f"Error creating user: {e}")
-        return None
-
-def multiplayer_mode():
-    """Start multiplayer mode with multiple clients"""
-    # Get usernames for players
-    player1 = input("Enter username for Player 1: ")
-    password1 = input("Enter password for Player 1: ")
+                if config.get("token") and config.get("username"):
+                    # We have authentication in client_config.json
+                    print(f"Using credentials from client_config.json for user: {config.get('username')}")
+                    
+                    # Start the game directly 
+                    print("Starting game client with direct launch...")
+                    if sys.platform.startswith('win'):
+                        # For Windows, use a more direct approach
+                        game_process = subprocess.Popen(
+                            [python_exe, "main.py"], 
+                            creationflags=subprocess.CREATE_NEW_CONSOLE
+                        )
+                        print(f"Game process started with PID: {game_process.pid}")
+                    else:
+                        # For non-Windows
+                        subprocess.Popen([python_exe, "main.py"])
+                    
+                    # Wait a moment to ensure process starts
+                    time.sleep(1)
+                    
+                    # Verify the process started
+                    if game_process and game_process.poll() is not None:
+                        print("Warning: Game process may have terminated immediately")
+                        return False
+                    
+                    return True
+                else:
+                    print("client_config.json found but missing token or username")
+        except Exception as e:
+            print(f"Error reading client_config.json: {e}")
     
-    player2 = input("Enter username for Player 2: ")
-    password2 = input("Enter password for Player 2: ")
+    # If we get here, there's no valid client_config.json
+    print("No valid credentials found in client_config.json")
+    print("Starting login page...")
     
-    # Create users and get token files
-    print("\nCreating/logging in players...")
-    player1_token = create_user(player1, password1)
-    if not player1_token:
-        print("Failed to create/login Player 1.")
-        return
+    # Use wait=True for Windows to ensure window opens properly
+    if sys.platform.startswith('win'):
+        process = subprocess.Popen([python_exe, "login.py"])
+        print(f"Login process started with PID: {process.pid}")
+    else:
+        subprocess.Popen([python_exe, "login.py"])
     
-    player2_token = create_user(player2, password2)
-    if not player2_token:
-        print("Failed to create/login Player 2.")
-        return
-    
-    # Save original auth_token.json if it exists
-    if os.path.exists("auth_token.json"):
-        with open("auth_token.json", "r") as f:
-            try:
-                original_token = json.load(f)
-                backup_file = os.path.join(TOKEN_FOLDER, "auth_token_original.json")
-                with open(backup_file, "w") as f2:
-                    json.dump(original_token, f2)
-                print(f"Backed up original auth_token.json to {backup_file}")
-            except:
-                pass
-    
-    # Start first client and confirm
-    print("\nStarting game for Player 1...")
-    if not start_client(player1_token):
-        print("Failed to start game for Player 1.")
-        return
-    
-    # Ask for confirmation before starting second client
-    input("\nPress Enter when Player 1's game window is open to start Player 2's game...")
-    
-    # Start second client
-    print("Starting game for Player 2...")
-    if not start_client(player2_token):
-        print("Failed to start game for Player 2.")
-        return
-    
-    print("\nBoth players should now be in the game!")
-    print("Players can now interact with each other in the multiplayer environment.")
-    print(f"\nNote: All player tokens are stored in the '{TOKEN_FOLDER}' folder.")
-    print(f"You can use them directly with: --token {player1} or --token {player2}")
-    print(f"When finished, you can restore your original credentials with: --token auth_token_original")
+    return True
 
 def handle_shutdown():
     """Handle clean shutdown of all processes"""
@@ -331,65 +202,14 @@ def handle_shutdown():
     
     print("Shutdown complete.")
 
-def load_token_from_folder(token_name):
-    """Helper function to load a token from the tokens folder by name"""
-    if not token_name.endswith('.json'):
-        token_name += '.json'
-    
-    token_file = os.path.join(TOKEN_FOLDER, token_name)
-    
-    if os.path.exists(token_file):
-        return token_file
-    
-    return None
-
-def list_available_tokens():
-    """List all available tokens in the token folder"""
-    if not os.path.exists(TOKEN_FOLDER):
-        print(f"Token folder '{TOKEN_FOLDER}' does not exist.")
-        return
-    
-    token_files = [f for f in os.listdir(TOKEN_FOLDER) if f.endswith('.json')]
-    
-    if not token_files:
-        print(f"No token files found in '{TOKEN_FOLDER}' folder.")
-        return
-    
-    print(f"\nAvailable tokens in '{TOKEN_FOLDER}' folder:")
-    for i, token_file in enumerate(token_files, 1):
-        # Try to extract username from file
-        try:
-            with open(os.path.join(TOKEN_FOLDER, token_file), 'r') as f:
-                data = json.load(f)
-                username = data.get('username', 'Unknown')
-                print(f"{i}. {token_file} - User: {username}")
-        except:
-            print(f"{i}. {token_file}")
-    
-    print("\nYou can use any of these tokens with: --token <token_name>")
-
 def main():
-    """Main function to run the CodeBreak game launcher"""
+    """Main function to run the CodeBreak game launcher with simplified flow"""
     parser = argparse.ArgumentParser(description="CodeBreak Game Launcher")
     parser.add_argument("--skip-server", action="store_true", help="Skip starting the server")
-    parser.add_argument("--multiplayer", action="store_true", help="Start in multiplayer mode")
     parser.add_argument("--client-only", action="store_true", help="Start only the client (login)")
-    parser.add_argument("--token", help="Use a specific token file from the loginTokens folder")
-    parser.add_argument("--list-tokens", action="store_true", help="List all available tokens")
-    parser = argparse.ArgumentParser(description="CodeBreak Game Launcher")
-    parser.add_argument("--web-token", help="Web login token URL")
-    parser.add_argument("--register", action="store_true", help="Register protocol handler")
     args = parser.parse_args()
     
     try:
-        # Ensure token folder exists
-        os.makedirs(TOKEN_FOLDER, exist_ok=True)
-        
-        # List tokens if requested
-        if args.list_tokens:
-            list_available_tokens()
-            return
-            
         # Initialize database if needed
         if not args.skip_server and not args.client_only:
             if not initialize_database():
@@ -409,45 +229,8 @@ def main():
             log_thread.daemon = True
             log_thread.start()
         
-        # Create client config
-        if not os.path.exists("client_config.json"):
-            with open("client_config.json", "w") as f:
-                f.write('{"server_url": "http://3.130.249.194:8000"}')
-        
-        # Choose mode
-        if args.token:
-            token_file = load_token_from_folder(args.token)
-            if token_file:
-                start_client(token_file)
-            else:
-                print(f"Token file '{args.token}' not found in {TOKEN_FOLDER} folder.")
-                start_client()  # Fall back to login
-        elif args.multiplayer:
-            multiplayer_mode()
-        elif args.client_only:
-            start_client()
-        else:
-            # Interactive menu
-            while True:
-                print("\nCodeBreak Launcher Menu:")
-                print("1. Start Single Player Game")
-                print("2. Start Multiplayer Game")
-                print("3. List Available Login Tokens")
-                print("4. Exit")
-                choice = input("Select an option (1-4): ")
-                
-                if choice == "1":
-                    start_client()
-                    break
-                elif choice == "2":
-                    multiplayer_mode()
-                    break
-                elif choice == "3":
-                    list_available_tokens()
-                elif choice == "4":
-                    break
-                else:
-                    print("Invalid choice. Please try again.")
+        # Launch client using client_config.json
+        start_client()
         
         # Keep the main thread alive while server is running
         if not args.skip_server and not args.client_only:
@@ -466,69 +249,5 @@ def main():
         print(f"An error occurred: {e}")
         handle_shutdown()
 
-def register_protocol_handler():
-    """Register the codebreak:// protocol handler"""
-    if not sys.platform.startswith('win'):
-        print("Protocol handler registration only supported on Windows")
-        return False
-    
-    try:
-        # Get the full path to this script
-        script_path = os.path.abspath(__file__)
-        
-        # Registry keys
-        protocol_key = r"SOFTWARE\Classes\codebreak"
-        command_key = r"SOFTWARE\Classes\codebreak\shell\open\command"
-        
-        # Create the protocol key
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, protocol_key) as key:
-            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:CodeBreak Protocol")
-            winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
-        
-        # Create the command key
-        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, command_key) as key:
-            command = f'"{sys.executable}" "{script_path}" --web-token "%1"'
-            winreg.SetValueEx(key, "", 0, winreg.REG_SZ, command)
-        
-        print("Protocol handler registered successfully")
-        return True
-    except Exception as e:
-        print(f"Failed to register protocol handler: {e}")
-        return False
-
-def handle_web_token(token_url):
-    """Handle web login token URL"""
-    try:
-        # Parse the URL (format: codebreak://TOKEN/USERNAME)
-        parsed = urllib.parse.urlparse(token_url)
-        
-        # Remove the protocol part
-        full_path = parsed.netloc + parsed.path
-        parts = full_path.split('/')
-        
-        # Get token and username
-        token = parts[0]
-        username = parts[1] if len(parts) > 1 else "Player"
-        
-        print(f"Received web token for user: {username}")
-        
-        # Save token to file
-        with open("auth_token.json", "w") as f:
-            json.dump({
-                "username": username,
-                "token": token,
-                "token_type": "bearer",
-                "web_login": True
-            }, f)
-        
-        # Launch the game
-        subprocess.Popen([sys.executable, "main.py"])
-        return True
-    except Exception as e:
-        print(f"Error handling web token: {e}")
-        return False
-
-
-
 if __name__ == "__main__":
-    main() 
+    main()
