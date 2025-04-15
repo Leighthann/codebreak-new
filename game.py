@@ -3088,7 +3088,6 @@ class Game:
                 for button in self.game_over_buttons:
                     if button.handle_event(event):
                         self.play_sound("menu_select")  # Add sound feedback
-                        break
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self.play_sound("menu_select")
                 self.transition_to("menu")
