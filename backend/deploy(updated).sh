@@ -13,27 +13,6 @@ echo "=========================================="
 echo "CodeBreak Comprehensive Deployment Script"
 echo "=========================================="
 
-# Ensure key file is accessible
-if [ ! -f "$KEY_PATH" ]; then
-    echo "Error: SSH key file not found at $KEY_PATH"
-    exit 1
-fi
-
-# Make sure key has correct permissions
-chmod 400 "$KEY_PATH"
-
-# Function to run SSH commands on remote server
-run_ssh_command() {
-    echo ">>> Running command: $1"
-    ssh -i "$KEY_PATH" "$REMOTE_USER@$EC2_HOST" "$1"
-}
-
-# Function to copy files to remote server
-copy_to_server() {
-    echo ">>> Copying $1 to $2"
-    scp -i "$KEY_PATH" "$1" "$REMOTE_USER@$EC2_HOST:$2"
-}
-
 echo "============================================"
 echo "STEP 1: Creating Database Tables"
 echo "============================================"

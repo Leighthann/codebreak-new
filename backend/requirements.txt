@@ -28,7 +28,6 @@ asyncpg>=0.26.0
 pyjwt>=2.10.0
 jinja2>=3.1.2
 
-dotenv>=1.0.0
 
 
 
