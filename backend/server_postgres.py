@@ -648,6 +648,7 @@ async def get_table_data(table_name: str, current_user = Depends(get_current_use
 # After the other route handlers, add this endpoint for client download
 @app.get("/download-client")
 async def download_client():
+
     """Serve the client zip file for download"""
     try:
         # Define source and target paths
@@ -680,6 +681,141 @@ async def download_client():
     except Exception as e:
         logger.error(f"Error serving client download: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Download error: {str(e)}")
+
+@app.get("/leaderboard")
+async def get_leaderboard(limit: int = 10, current_user = Depends(get_current_user)):
+    """Get top leaderboard entries"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Get top scores
+        cursor.execute("""
+            SELECT l.*, p.last_login 
+            FROM leaderboard l
+            LEFT JOIN players p ON l.username = p.username
+            ORDER BY l.score DESC
+            LIMIT %s
+        """, (limit,))
+        
+        entries = []
+        for row in cursor.fetchall():
+            entry = dict(row)
+            # Format dates as ISO strings for JSON serialization
+            if entry.get("date"):
+                entry["date"] = entry["date"].isoformat()
+            if entry.get("last_login"):
+                entry["last_login"] = entry["last_login"].isoformat()
+                
+            entries.append(entry)
+        
+        cursor.close()
+        conn.close()
+        
+        return {"leaderboard": entries}
+    except Exception as e:
+        logger.error(f"Error fetching leaderboard: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching leaderboard: {str(e)}")
+
+@app.post("/leaderboard")
+async def submit_score(score_data: dict, current_user = Depends(get_current_user)):
+    """Submit a new score to the leaderboard"""
+    try:
+        username = current_user["username"]
+        score = score_data.get("score", 0)
+        wave_reached = score_data.get("wave_reached", 0)
+        survival_time = score_data.get("survival_time", 0)
+        
+        # Validate score data
+        if score <= 0:
+            raise HTTPException(status_code=400, detail="Score must be greater than 0")
+            
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if user already has a score
+        cursor.execute("SELECT id, score FROM leaderboard WHERE username = %s", (username,))
+        existing_score = cursor.fetchone()
+        
+        # Insert or update score
+        if existing_score:
+            # Only update if new score is higher
+            if score > existing_score[1]:
+                cursor.execute(
+                    """UPDATE leaderboard 
+                       SET score = %s, wave_reached = %s, survival_time = %s, date = %s 
+                       WHERE id = %s""",
+                    (score, wave_reached, survival_time, datetime.now(), existing_score[0])
+                )
+                updated = True
+            else:
+                updated = False
+        else:
+            # Insert new score
+            cursor.execute(
+                """INSERT INTO leaderboard 
+                   (username, score, wave_reached, survival_time, date) 
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (username, score, wave_reached, survival_time, datetime.now())
+            )
+            updated = True
+            
+        # Update player score in players table too
+        cursor.execute(
+            "UPDATE players SET score = GREATEST(score, %s) WHERE username = %s",
+            (score, username)
+        )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return {
+            "status": "success",
+            "message": "Score updated successfully" if updated else "Score not updated (current score is higher)",
+            "score": score
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error submitting score: {e}")
+        raise HTTPException(status_code=500, detail=f"Error submitting score: {str(e)}")
+
+# Public version of leaderboard endpoint (no auth required)
+@app.get("/leaderboard/public")
+async def get_public_leaderboard(limit: int = 10):
+    """Get top leaderboard entries (public endpoint, no auth required)"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Get top scores
+        cursor.execute("""
+            SELECT l.*, p.last_login
+            FROM leaderboard l
+            LEFT JOIN players p ON l.username = p.username
+            ORDER BY l.score DESC
+            LIMIT %s
+        """, (limit,))
+        
+        entries = []
+        for row in cursor.fetchall():
+            entry = dict(row)
+            # Format dates as ISO strings for JSON serialization
+            if entry.get("date"):
+                entry["date"] = entry["date"].isoformat()
+            if entry.get("last_login"):
+                entry["last_login"] = entry["last_login"].isoformat()
+                
+            entries.append(entry)
+        
+        cursor.close()
+        conn.close()
+        
+        return {"leaderboard": entries}
+    except Exception as e:
+        logger.error(f"Error fetching public leaderboard: {e}")
+        raise HTTPException(status_code=500, detail=f"Error fetching leaderboard: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
