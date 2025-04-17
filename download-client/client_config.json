@@ -1,3 +1,9 @@
 {
     "server_url": "http://3.130.249.194:8000"
+
+    {
+        "server_url": "http://3.130.249.194:8000",
+        "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJsZWlnaGthZGVlbkBob3RtYWlsLmNvbSIsImV4cCI6MTc0NDkxMDE5Nn0.t8tr7YFgFAr8gDrUZec1RCbvdnY4XdF9SXiqA7pTLbM",
+        "username": "leighkadeen@hotmail.com"
+      }
 }
