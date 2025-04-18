@@ -13,8 +13,6 @@ WIDTH, HEIGHT = 800, 600
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("CodeBreak - Leaderboard")
 
-# Token folder path
-TOKEN_FOLDER = "loginTokens"
 
 # Colors
 WHITE = (255, 255, 255)
@@ -75,7 +73,7 @@ class Button:
         return False
 
 class Leaderboard:
-    def __init__(self, server_url="http://3.130.249.194:8000/leaderboard"):
+    def __init__(self, server_url="http://3.130.249.194:8000"):
         self.server_url = server_url
         self.leaderboard_data = []
         self.player_username = None
@@ -94,32 +92,22 @@ class Leaderboard:
     def load_auth_token(self):
         """Load auth token from file if exists"""
         try:
-            # First try the standard location
-            '''if os.path.exists("auth_token.json"):
-                with open("auth_token.json", "r") as f:
-                    auth_data = json.load(f)
-                    self.auth_token = auth_data.get("token")
-                    self.player_username = auth_data.get("username")
-                    return
-            '''
-                    
+    
             # If not found, try the token folder
-            if os.path.exists(TOKEN_FOLDER):
-                # Try loading the most recently modified token file
-                token_files = [os.path.join(TOKEN_FOLDER, f) for f in os.listdir(TOKEN_FOLDER) 
-                              if f.endswith('_token.json')]
-                
-                if token_files:
-                    # Sort by modification time, newest first
-                    token_files.sort(key=os.path.getmtime, reverse=True)
-                    
-                    # Load the most recent token
-                    with open(token_files[0], "r") as f:
-                        auth_data = json.load(f)
-                        self.auth_token = auth_data.get("token")
-                        self.player_username = auth_data.get("username")
-                        print(f"Loaded token for {self.player_username} from {token_files[0]}")
-                        return
+            config_path = "client_config.json"
+        
+            if os.path.exists(config_path):
+                print(f"Found configuration at {config_path}")
+                with open(config_path, "r") as f:
+                    config_data = json.load(f)
+                    self.auth_token = config_data.get("token")
+                    self.player_username = config_data.get("username")
+                    print(f"Loaded token for {self.player_username}")
+                    return
+            else:
+                print("client_config.json not found")
+                self.auth_token = None
+                self.player_username = None
                         
         except Exception as e:
             print(f"Error loading auth token: {e}")
@@ -184,7 +172,9 @@ class Leaderboard:
             
     def return_to_game(self):
         """Return to the main game"""
-        pygame.quit()
+        if __name__ == "__main__":
+            pygame.quit()
+        return False  # Signal to return to game
         
     def draw_background(self, screen):
         """Draw cyberpunk-style background with grid and glow effects"""
@@ -380,4 +370,4 @@ def main():
     pygame.quit()
 
 if __name__ == "__main__":
-    main() 
+    main()         

@@ -32,11 +32,11 @@ try:
     # info_font = pygame.font.Font("fonts/cyberpunk.ttf", 24)
     title_font = pygame.font.Font("fonts/PropolishRufftu-BLLyd.ttf", 60)
     button_font = pygame.font.Font("fonts/GlitchGoblin-2O87v.ttf", 40)
-    info_font = pygame.font.Font("fonts/Valorax-lg25V.otf", 24)
+    info_font = pygame.font.Font("fonts/VeniteAdoremusStraight-Yzo6v.ttf", 24)
 except:
     print("Warning: Could not load cyberpunk font, using system font")
-    title_font = pygame.font.Font(None, 60)
-    button_font = pygame.font.Font(None, 40)
+    title_font = pygame.font.Font(None, 60) #rank_text
+    button_font = pygame.font.Font(None, 40) #header_text
     info_font = pygame.font.Font(None, 24)
 
 # Colors
@@ -462,18 +462,7 @@ class Game:
         self.show_crafting = False  # New flag for crafting UI
 
         # Leaderboard data
-        self.leaderboard_entries = [
-            {"name": "ByteMaster", "score": 10000, "time": 1800},
-            {"name": "CodeBreaker", "score": 8500, "time": 1500},
-            {"name": "CyberSlice", "score": 7200, "time": 1200},
-            {"name": "DataRunner", "score": 6800, "time": 1100},
-            {"name": "EncryptionKey", "score": 5500, "time": 900},
-            {"name": "FirewallHacker", "score": 4200, "time": 800},
-            {"name": "GlitchHunter", "score": 3600, "time": 700},
-            {"name": "HexHacker", "score": 2800, "time": 600},
-            {"name": "InfoSec", "score": 2000, "time": 500},
-            {"name": "JavaScripter", "score": 1500, "time": 400}
-        ]
+        self.leaderboard_entries = []
         self.leaderboard_last_update = 0
         self.leaderboard = None
         
@@ -579,6 +568,7 @@ class Game:
                         self.username = config.get("username")
                         # Make sure to use the server_url from config
                         if config.get("server_url"):
+                            print(f"Using server URL from config: {config.get('server_url')}")
                             self.server_url = config.get("server_url")
                         return
                     else:
@@ -644,7 +634,6 @@ class Game:
             # Check if font file exists
             if os.path.exists("fonts/cyber.ttf"):
                 self.font_xl = pygame.font.Font("fonts/cyber.ttf", 48)
-                self.font_lg = pygame.font.Font("fonts/cyber.ttf", 36)
                 self.font_md = pygame.font.Font("fonts/cyber.ttf", 24)
                 self.font_sm = pygame.font.Font("fonts/cyber.ttf", 18)
             else:
@@ -1531,7 +1520,6 @@ class Game:
         # Draw chat system on top of everything
         self.chat_system.draw(self.screen)
 
-
     def draw_gameplay_ui(self):
         """Draw the gameplay UI elements."""
         if not self.player:
@@ -1809,7 +1797,7 @@ class Game:
         
         # Draw table headers with cyberpunk style
         headers = ["RANK", "PLAYER", "SCORE", "TIME"]
-        header_positions = [80, 180, 480, 600]
+        header_positions = [120, 280, 600, 900]  # Modified to increase spacing
         
         header_bg = pygame.Surface((WIDTH - 160, 40))
         header_bg.fill((0, 50, 100))
@@ -1826,40 +1814,26 @@ class Game:
         pygame.draw.rect(glow_surf, (*NEON_BLUE, 50), (0, 0, WIDTH - 100, 13))
         self.screen.blit(glow_surf, (50, 165))
         
-        # Draw placeholder leaderboard entries with enhanced visuals
-        entries = [
-            {"name": "ByteMaster", "score": 10000, "time": 1800},
-            {"name": "CodeBreaker", "score": 8500, "time": 1500},
-            {"name": "CyberSlice", "score": 7200, "time": 1200},
-            {"name": "DataRunner", "score": 6800, "time": 1100},
-            {"name": "EncryptionKey", "score": 5500, "time": 900},
-            {"name": "FirewallHacker", "score": 4200, "time": 800},
-            {"name": "GlitchHunter", "score": 3600, "time": 700},
-            {"name": "HexHacker", "score": 2800, "time": 600},
-            {"name": "InfoSec", "score": 2000, "time": 500},
-            {"name": "JavaScripter", "score": 1500, "time": 400}
-        ]
-        
         # Add the player's score if they've played
         if hasattr(self, 'score') and self.score > 0:
             player_entry = {"name": "YOU", "score": self.score, "time": int(self.survival_time)}
             
             # Insert at correct position
             inserted = False
-            for i, entry in enumerate(entries):
+            for i, entry in enumerate(self.leaderboard_entries):
                 if player_entry["score"] > entry["score"]:
-                    entries.insert(i, player_entry)
+                    self.leaderboard_entries.insert(i, player_entry)
                     inserted = True
                     break
             
-            if not inserted and len(entries) < 10:
-                entries.append(player_entry)
+            if not inserted and len(self.leaderboard_entries) < 10:
+                self.leaderboard_entries.append(player_entry)
             
             # Keep only top 10
-            entries = entries[:10]
+            self.leaderboard_entries = self.leaderboard_entries[:10]
         
         # Draw entries with alternating row backgrounds
-        for i, entry in enumerate(entries):
+        for i, entry in enumerate(self.leaderboard_entries):
             y_pos = 180 + i * 40
             
             # Row background with alternating colors
@@ -1876,27 +1850,27 @@ class Game:
             # Draw rank with medal for top 3
             if i < 3:
                 medal_colors = [(255, 215, 0), (192, 192, 192), (205, 127, 50)]  # Gold, Silver, Bronze
-                pygame.draw.circle(self.screen, medal_colors[i], (80, y_pos + 20), 15)
+                pygame.draw.circle(self.screen, medal_colors[i], (120, y_pos + 20), 15)  # Modified x position
                 rank_text = info_font.render(str(i+1), True, (0, 0, 0))
-                self.screen.blit(rank_text, (80 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
+                self.screen.blit(rank_text, (120 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
             else:
                 rank_text = info_font.render(f"{i+1}", True, (255, 255, 255))
-                self.screen.blit(rank_text, (80 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
+                self.screen.blit(rank_text, (120 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))  # Modified x position
             
             # Draw player name
             name_text = info_font.render(entry.get("name", "Unknown"), True, 
                                        (255, 255, 0) if entry.get("name") == "YOU" else (255, 255, 255))
-            self.screen.blit(name_text, (180, y_pos + 12))
+            self.screen.blit(name_text, (280, y_pos + 12))  # Modified x position
             
             # Draw score with formatting
             score_text = info_font.render(f"{entry.get('score', 0):,}", True, (255, 255, 255))
-            self.screen.blit(score_text, (480, y_pos + 12))
+            self.screen.blit(score_text, (600, y_pos + 12))  # Modified x position
             
             # Draw time with formatting
             minutes = entry.get('time', 0) // 60
             seconds = entry.get('time', 0) % 60
             time_text = info_font.render(f"{minutes}m {seconds}s", True, (255, 255, 255))
-            self.screen.blit(time_text, (600, y_pos + 12))
+            self.screen.blit(time_text, (900, y_pos + 12))  # Modified x position
         
         # Draw back button
         self.draw_back_button()
@@ -1985,8 +1959,8 @@ class Game:
                                  lambda v: self.update_setting("difficulty", v))
         
         # Draw back button
-        back_btn = Button("SAVE & RETURN", WIDTH // 2 - 125, HEIGHT - 80, 250, 50, 
-                         lambda: self.transition_to("menu"))
+        back_btn = Button(WIDTH // 2 - 125, HEIGHT - 80, 250, 50, "BACK",
+                        callback=lambda: self.transition_to("menu"))
         back_btn.draw(self.screen, button_font)
 
     def draw_setting_slider(self, label, x, y, value, on_change):
@@ -3098,26 +3072,35 @@ class Game:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 for button in self.game_over_buttons:
                     if button.handle_event(event):
-                        self.play_sound("menu_select")  # Add sound feedback
-                        break
+                        return  # Ensure the button action is executed
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self.play_sound("menu_select")
                 self.transition_to("menu")
         
         # If this is the first time processing game over, send score to server
         if not hasattr(self, 'score_submitted') or not self.score_submitted:
+            # Make sure we have valid authentication
             if hasattr(self, 'auth_token') and self.auth_token:
                 # Submit the score using auth token
                 headers = {"Authorization": f"Bearer {self.auth_token}"}
                 try:
                     data = {
                         "score": display_score,
-                        "wave_reached": self.wave_number,
-                        "survival_time": display_time
+                        "wave_reached": getattr(self, 'final_wave', self.wave_number),
+                        "survival_time": int(display_time)
                     }
                     print(f"Submitting final score: {data}")
-                    response = requests.post(f"{self.server_url}/leaderboard/", 
-                                        json=data, headers=headers, timeout=5)
+                    print(f"Using server URL: {self.server_url}")
+                    print(f"Auth token: {self.auth_token[:10]}...")
+                    
+                    # Fix the endpoint - remove trailing slash
+                    response = requests.post(
+                        f"{self.server_url}/leaderboard", 
+                        json=data, 
+                        headers=headers,
+                        timeout=5
+                    )
+                    
                     if response.status_code == 200:
                         print("Score submitted successfully")
                         self.add_effect("text", WIDTH // 2, 300, 
@@ -3149,9 +3132,12 @@ class Game:
             return
             
         # Record the final score and stats
-            self.final_score = self.score
-            self.final_time = self.survival_time
+        self.final_score = self.score
+        self.final_time = self.survival_time
         self.final_wave = self.wave_number
+        
+        # Print debug info to confirm values are captured
+        print(f"Player defeated! Final score: {self.final_score}, Final time: {self.final_time}, Wave: {self.final_wave}")
         
         # Set the game over flag so state transition can be handled properly
         self.game_over_triggered = True
@@ -3172,27 +3158,8 @@ class Game:
                 os.makedirs("game_stats")
                 
             # Append to local file
-            with open("game_stats/defeat_records.json", "a+") as f:
-                f.seek(0)  # Go to start of file
-                try:
-                    # Try to read existing content
-                    content = f.read().strip()
-                    data = json.loads(content) if content else []
-                except json.JSONDecodeError:
-                    # If file is empty or corrupted, start fresh
-                    data = []
-                
-                # Move to end for appending
-                f.seek(0, 2)
-                # If file is not empty and doesn't end with a comma, add one
-                if f.tell() > 2:
-                    f.write(",\n")
-                else:
-                    # If file is empty, start with bracket
-                    f.seek(0)
-                    f.write("[\n")
-                
-                # Write new entry
+            with open("game_stats/defeat_records.json", "w") as f:
+                f.write("[\n")
                 f.write(json.dumps(defeat_data, indent=2))
                 f.write("\n]")
                 
@@ -3203,18 +3170,25 @@ class Game:
         # Submit score to leaderboard if authenticated
         try:
             print("Submitting score to leaderboard...")
-            headers = {"Authorization": f"Bearer {self.auth_token}"} if hasattr(self, 'auth_token') and self.auth_token else {}
+            print(f"Auth token available: {hasattr(self, 'auth_token') and bool(self.auth_token)}")
+            print(f"Server URL: {self.server_url}")
             
-            # Only proceed if we have an auth token
-            if headers:
-                response = requests.post(f"{self.server_url}/leaderboard/",
-                                        json={
-                                            "score": self.final_score,
-                                            "wave_reached": self.final_wave,
-                                            "survival_time": self.final_time
-                                        },
-                                        headers=headers,
-                                        timeout=5)
+            if hasattr(self, 'auth_token') and self.auth_token:
+                headers = {"Authorization": f"Bearer {self.auth_token}"}
+                data = {
+                    "score": self.final_score,
+                    "wave_reached": self.final_wave,
+                    "survival_time": int(self.final_time)  # Convert to integer
+                }
+                print(f"Submitting data: {data}")
+                print(f"With auth token: {self.auth_token[:10]}...")
+                
+                response = requests.post(
+                    f"{self.server_url}/leaderboard",  # Remove trailing slash
+                    json=data,
+                    headers=headers,
+                    timeout=5
+                )
                 
                 if response.status_code == 200:
                     print("Score submitted successfully!")
@@ -3223,6 +3197,7 @@ class Game:
                     print(f"Failed to submit score: {response.status_code} - {response.text}")
             else:
                 print("Not authenticated, skipping score submission")
+                print("Auth token:", self.auth_token if hasattr(self, 'auth_token') else "None")
         except Exception as e:
             print(f"Error submitting score: {e}")
 
@@ -3233,13 +3208,20 @@ class Game:
                       size=50,
                       duration=3.0)
                       
+        # Force immediate transition to game over screen for testing
+        self.current_state = "game_over"
+        
         # Schedule transition to game over screen
-        pygame.time.set_timer(self.game_over_event_id, 3000)  # 3 second delay
+        # pygame.time.set_timer(self.game_over_event_id, 3000)  # 3 second delay
 
     async def update_game_world(self, dt):
         """Update all game world elements."""
         # Update survival time
-        self.survival_time += dt
+        if self.current_state == "gameplay" and not self.show_crafting:
+            self.survival_time += dt
+            # Debug output to verify time is incrementing
+            if int(self.survival_time) % 10 == 0 and self.survival_time > 0:
+                print(f"Survival time: {int(self.survival_time)} seconds, Current score: {self.score}, Wave: {self.wave_number}")
 
         # Update player invincibility frames
         if self.player and hasattr(self.player, 'is_invincible'):
@@ -3266,8 +3248,6 @@ class Game:
         
         # Clean up inactive other players
         self.cleanup_inactive_players()
-        
-        # Update camera shake
 
     def cleanup_inactive_players(self, max_idle_time=30000):  # 30 seconds
         """Remove players that haven't updated in too long"""
@@ -3285,7 +3265,7 @@ class Game:
             self.fetch_leaderboard()
         
         # Draw leaderboard background
-        self.draw_leaderboard_background()
+        self.draw_leaderboard_background(dt)
         
         # Draw leaderboard title
         title_text = self.font_lg.render("LEADERBOARD", True, NEON_BLUE)
@@ -3295,44 +3275,102 @@ class Game:
         # Update and draw leaderboard entries
         self.draw_leaderboard_entries()
         
-        # Draw back button
-        self.draw_back_button()
+        # Create and draw back button
+        back_button = Button(WIDTH // 2 - 75, HEIGHT - 80, 150, 40, "BACK", lambda: self.transition_to("menu"))
+        mouse_pos = pygame.mouse.get_pos()
+        back_button.update(mouse_pos)
+        back_button.draw(self.screen, self.font_md)
+        
+        # Draw instructions
+        instructions = self.font_sm.render("Press ESC to return to menu", True, (200, 200, 255))
+        self.screen.blit(instructions, (WIDTH // 2 - instructions.get_width() // 2, HEIGHT - 30))
         
         # Handle events
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.transition_to("menu")
-                    return
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                # Handle back button click
+                if back_button.handle_event(event):
+                    self.play_sound("menu_select")
+                    self.transition_to("menu")
 
-    def draw_leaderboard_background(self):
-        """Draw the leaderboard background."""
-        # Draw a dark background with grid pattern
+    def draw_leaderboard_background(self,dt):
+        """Draw animated cyberpunk background for leaderboard."""
+    # Create a surface for the background
         background = pygame.Surface((WIDTH, HEIGHT))
         background.fill((5, 10, 20))  # Dark blue
-        
-        # Add grid lines with perspective effect
+    
+        # Update grid animation offset
+        self.grid_offset_y = (self.grid_offset_y + 30 * dt) % 30
+        grid_spacing = 30
+    
+        # Set up vanishing points
         vanishing_point_x = WIDTH // 2
-        vanishing_point_y = -100
+        vanishing_point_y = HEIGHT // 2
+    
+        # Draw horizontal grid lines with animation and perspective
+        for y in range(int(self.grid_offset_y), HEIGHT, grid_spacing):
+            line_width = max(1, int(3 * (y / HEIGHT)))
+            perspective = 0.3 + 0.7 * (y / HEIGHT)
+            x1 = WIDTH // 2 - int(WIDTH * 0.5 * perspective)
+            x2 = WIDTH // 2 + int(WIDTH * 0.5 * perspective)
+            color = (0, 100, 255, int(100 * (1 - y / HEIGHT)))
+            pygame.draw.line(background, color, (x1, y), (x2, y), line_width)
+    
+        # Draw vertical grid lines with perspective (radial)
+        num_lines = 20
+        for i in range(num_lines):
+            angle = i * (math.pi / num_lines)
+            x = vanishing_point_x + int(WIDTH * math.cos(angle))
+            y = vanishing_point_y + int(HEIGHT * math.sin(angle))
+            color = (0, 100, 255, int(80 * (1 - abs(i - num_lines/2) / (num_lines/2))))
+            pygame.draw.line(background, color, (vanishing_point_x, vanishing_point_y),
+                            (x, y), 1)
+    
+        # Add floating data particles
+        if len(self.bg_particles) < 50:
+            if random.random() < 0.1:
+                particle = {
+                    "x": random.randint(0, WIDTH),
+                    "y": random.randint(0, HEIGHT),
+                    "size": random.randint(2, 6),
+                    "color": random.choice([NEON_BLUE, NEON_PINK, NEON_GREEN]),
+                    "speed": random.uniform(10, 30),
+                    "direction": random.uniform(0, 2 * math.pi)
+                }
+                self.bg_particles.append(particle)
         
-        # Draw horizontal grid lines with perspective
-        for y in range(0, HEIGHT + 100, 40):
-            start_x_left = 0
-            start_x_right = WIDTH
-            end_x_left = (0 - vanishing_point_x) * (HEIGHT - y) / (HEIGHT - vanishing_point_y) + vanishing_point_x
-            end_x_right = (WIDTH - vanishing_point_x) * (HEIGHT - y) / (HEIGHT - vanishing_point_y) + vanishing_point_x
+        # Update and draw particles
+        for particle in self.bg_particles[:]:
+            # Move particle
+            particle["x"] += particle["speed"] * dt * math.cos(particle["direction"])
+            particle["y"] += particle["speed"] * dt * math.sin(particle["direction"])
             
-            # Draw only if within screen
-            if y < HEIGHT:
-                color = (0, 100, 255, int(100 * (1 - y / HEIGHT)))
-                pygame.draw.line(background, color, (start_x_left, y), (end_x_left, vanishing_point_y))
-                pygame.draw.line(background, color, (start_x_right, y), (end_x_right, vanishing_point_y))
+            # Remove if off-screen
+            if (particle["x"] < 0 or particle["x"] > WIDTH or
+                particle["y"] < 0 or particle["y"] > HEIGHT):
+                self.bg_particles.remove(particle)
+                continue
+            
+            # Draw particle
+            pygame.draw.circle(background, particle["color"],
+                            (int(particle["x"]), int(particle["y"])),
+                            particle["size"])
         
-        # Add vertical grid lines
-        for x in range(0, WIDTH, 80):
-            color = (0, 100, 255, int(100 * (1 - abs(x - WIDTH/2) / (WIDTH/2))))
-            pygame.draw.line(background, color, (x, 0), (x, HEIGHT))
+        # Add a subtle glow effect to the grid
+        for i in range(3):
+            glow_x = WIDTH // 2 + random.randint(-100, 100)
+            glow_y = HEIGHT // 2 + random.randint(-100, 100)
+            glow_radius = random.randint(100, 200)
+            glow_surface = pygame.Surface((glow_radius*2, glow_radius*2), pygame.SRCALPHA)
+            for r in range(glow_radius, 0, -1):
+                alpha = int(30 * (r / glow_radius))
+                pygame.draw.circle(glow_surface, (0, 100, 255, alpha), (glow_radius, glow_radius), r)
+            background.blit(glow_surface, (glow_x - glow_radius, glow_y - glow_radius), special_flags=pygame.BLEND_ADD)
         
+        # Display the background
         self.screen.blit(background, (0, 0))
 
     def draw_leaderboard_entries(self):
@@ -3346,7 +3384,7 @@ class Game:
     def draw_table_headers(self):
         """Draw the table headers."""
         headers = ["RANK", "PLAYER", "SCORE", "TIME"]
-        header_positions = [80, 180, 480, 600]
+        header_positions = [120, 280, 600, 900]  # Modified to increase spacing
         
         header_bg = pygame.Surface((WIDTH - 160, 40))
         header_bg.fill((0, 50, 100))
@@ -3401,27 +3439,27 @@ class Game:
             # Draw rank with medal for top 3
             if i < 3:
                 medal_colors = [(255, 215, 0), (192, 192, 192), (205, 127, 50)]  # Gold, Silver, Bronze
-                pygame.draw.circle(self.screen, medal_colors[i], (80, y_pos + 20), 15)
+                pygame.draw.circle(self.screen, medal_colors[i], (120, y_pos + 20), 15)
                 rank_text = info_font.render(str(i+1), True, (0, 0, 0))
-                self.screen.blit(rank_text, (80 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
+                self.screen.blit(rank_text, (120 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
             else:
                 rank_text = info_font.render(f"{i+1}", True, (255, 255, 255))
-                self.screen.blit(rank_text, (80 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
+                self.screen.blit(rank_text, (120 - rank_text.get_width()//2, y_pos + 20 - rank_text.get_height()//2))
             
             # Draw player name
             name_text = info_font.render(entry.get("name", "Unknown"), True, 
                                        (255, 255, 0) if entry.get("name") == "YOU" else (255, 255, 255))
-            self.screen.blit(name_text, (180, y_pos + 12))
+            self.screen.blit(name_text, (280, y_pos + 12))
             
             # Draw score with formatting
             score_text = info_font.render(f"{entry.get('score', 0):,}", True, (255, 255, 255))
-            self.screen.blit(score_text, (480, y_pos + 12))
+            self.screen.blit(score_text, (600, y_pos + 12))
             
             # Draw time with formatting
             minutes = entry.get('time', 0) // 60
             seconds = entry.get('time', 0) % 60
             time_text = info_font.render(f"{minutes}m {seconds}s", True, (255, 255, 255))
-            self.screen.blit(time_text, (600, y_pos + 12))
+            self.screen.blit(time_text, (900, y_pos + 12))
 
     def draw_back_button(self):
         """Draw the back button."""
