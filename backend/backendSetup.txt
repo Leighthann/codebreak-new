@@ -171,3 +171,5 @@ sudo systemctl status codebreak
 2. Keep your SSH key secure
 3. Consider setting up HTTPS using Let's Encrypt
 4. Use a strong password for PostgreSQL
+
+ssh -i "codebreak-key.pem" ubuntu@ec2-3-130-249-194.us-east-2.compute.amazonaws.com

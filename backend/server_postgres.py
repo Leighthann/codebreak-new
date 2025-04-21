@@ -535,6 +535,21 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                             "timestamp": datetime.now().isoformat()
                         })
                 
+                elif action == "share_resource":
+                    # Handle resource sharing
+                    if "resource_type" in data and "amount" in data:
+                        resource_type = data["resource_type"]
+                        amount = data["amount"]
+                        
+                        # Broadcast to other players
+                        await manager.broadcast({
+                            "event": "share_resource",
+                            "resource_type": resource_type,
+                            "amount": amount,
+                            "shared_by": username
+                        }, exclude=username)
+                        
+                
                 # Add other action handlers as needed
     
     except WebSocketDisconnect:
