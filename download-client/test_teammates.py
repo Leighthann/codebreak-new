@@ -27,6 +27,12 @@ class TeammateTest:
         # Initialize pygame first
         pygame.init()
         
+        # Create a single screen that we'll use for all views
+        # This is a design choice - we'll display multiple game instances in a single window
+        # rather than creating multiple windows which causes flickering
+        main_screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption("CodeBreak - Teammate Test")
+        
         for i, player in enumerate(players):
             config = {
                 "server_url": "http://3.130.249.194:8000",
@@ -41,9 +47,8 @@ class TeammateTest:
             
             print(f"Created configuration for {player['username']}")
             
-            # Create window for this player
-            screen = pygame.display.set_mode((WIDTH, HEIGHT))
-            pygame.display.set_caption(f"CodeBreak - {player['username']}")
+            # Create a surface for this game instance (not a new window)
+            screen = pygame.Surface((WIDTH, HEIGHT))
             self.screens.append(screen)
             
             # Create and initialize game instance
@@ -51,11 +56,6 @@ class TeammateTest:
             game.screen = screen  # Set the screen for this game instance
             await game.initialize_game_world()  # Initialize the game world
             self.games.append(game)
-            
-            # Create a new display for the second window
-            if i == 0:
-                # Create a second window by changing the display mode
-                pygame.display.set_mode((WIDTH, HEIGHT))
     
     async def run_test(self):
         """Run the teammate and resource sharing test"""
@@ -73,6 +73,9 @@ class TeammateTest:
         
         clock = pygame.time.Clock()
         running = True
+        
+        # Get the main display surface
+        main_screen = pygame.display.get_surface()
         
         while running:
             # Handle events
@@ -92,18 +95,17 @@ class TeammateTest:
                             if game.chat_system:
                                 game.chat_system.toggle_chat()
             
+            # First clear the main screen
+            main_screen.fill((0, 0, 0))
+            
             # Update and render each game instance
             for i, (game, screen) in enumerate(zip(self.games, self.screens)):
                 if game.player:
-                    # Set the current screen for this game
-                    pygame.display.set_mode((WIDTH, HEIGHT))
-                    game.screen = screen
+                    # Clear the screen surface for this game
+                    screen.fill((0, 0, 0))
                     
                     # Update game state
                     await game.handle_gameplay([], 1/60)
-                    
-                    # Clear the screen
-                    screen.fill((0, 0, 0))
                     
                     # Draw game
                     game.draw_gameplay_elements()
@@ -111,8 +113,22 @@ class TeammateTest:
                     # Draw debug info
                     self.draw_debug_overlay(game)
                     
-                    # Update display for this window
-                    pygame.display.flip()
+                    # If we have more than one game, display them side by side
+                    # or use another layout approach
+                    if len(self.games) > 1:
+                        # Calculate position for this game's view
+                        if i == 0:
+                            # Left half of the screen
+                            main_screen.blit(screen, (0, 0), (0, 0, WIDTH//2, HEIGHT))
+                        else:
+                            # Right half of the screen
+                            main_screen.blit(screen, (WIDTH//2, 0), (0, 0, WIDTH//2, HEIGHT))
+                    else:
+                        # Just one game, use the full screen
+                        main_screen.blit(screen, (0, 0))
+            
+            # Update the display only once per frame
+            pygame.display.flip()
             
             # Cap framerate
             clock.tick(60)

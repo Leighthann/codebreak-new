@@ -13,17 +13,16 @@ from fastapi.responses import FileResponse
 import shutil
 import os
 from pydantic import BaseModel
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any
 import json
-import uuid
-import psycopg2
-import psycopg2.extras
-from datetime import datetime, timedelta
+from uuid import uuid4
 import jwt
-import os
 from dotenv import load_dotenv
 from passlib.context import CryptContext
 import logging
+import psycopg2
+import psycopg2.extras
+from datetime import datetime, timedelta
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -164,6 +163,8 @@ class PlayerModel(BaseModel):
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[str, WebSocket] = {}
+        self.active_games: Dict[str, Dict[str, Any]] = {}
+        self.game_players: Dict[str, List[str]] = {}
         
     async def connect(self, websocket: WebSocket, username: str):
         await websocket.accept()
@@ -190,6 +191,116 @@ class ConnectionManager:
                 except Exception as e:
                     logger.error(f"Error sending to {username}: {e}")
                     self.disconnect(username)
+
+    async def create_game(self, host_username: str) -> str:
+        """Create a new game session"""
+        game_id = str(uuid4())
+        self.active_games[game_id] = {
+            "host": host_username,
+            "created_at": datetime.now().isoformat()
+        }
+        self.game_players[game_id] = [host_username]
+        
+        # Save to database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO active_games (game_id, host_username) VALUES (%s, %s)",
+            (game_id, host_username)
+        )
+        cursor.execute(
+            "INSERT INTO game_players (game_id, username) VALUES (%s, %s)",
+            (game_id, host_username)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return game_id
+
+    async def join_game(self, game_id: str, username: str) -> bool:
+        """Join an existing game session"""
+        if game_id not in self.active_games:
+            return False
+        
+        if username in self.game_players.get(game_id, []):
+            return True  # Already in the game
+        
+        # Add player to the game
+        if game_id not in self.game_players:
+            self.game_players[game_id] = []
+        self.game_players[game_id].append(username)
+        
+        # Save to database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO game_players (game_id, username) VALUES (%s, %s)",
+            (game_id, username)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        # Notify other players in the game
+        await self.broadcast_to_game(game_id, {
+            "event": "player_joined_game",
+            "username": username,
+            "timestamp": datetime.now().isoformat()
+        }, exclude=username)
+        
+        return True
+
+    async def leave_game(self, game_id: str, username: str) -> bool:
+        """Leave a game session"""
+        if game_id not in self.active_games or username not in self.game_players.get(game_id, []):
+            return False
+        
+        # Remove player from the game
+        self.game_players[game_id].remove(username)
+        
+        # Delete from database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM game_players WHERE game_id = %s AND username = %s",
+            (game_id, username)
+        )
+        conn.commit()
+        
+        # If host left, delete the game if no players remain
+        if username == self.active_games[game_id]["host"]:
+            if not self.game_players[game_id]:
+                cursor.execute(
+                    "DELETE FROM active_games WHERE game_id = %s",
+                    (game_id,)
+                )
+                del self.active_games[game_id]
+                del self.game_players[game_id]
+        
+        cursor.close()
+        conn.close()
+        
+        # Notify other players in the game
+        await self.broadcast_to_game(game_id, {
+            "event": "player_left_game",
+            "username": username,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        return True
+
+    async def broadcast_to_game(self, game_id: str, message: Dict, exclude: Optional[str] = None):
+        """Broadcast message to all players in a specific game"""
+        players = self.game_players.get(game_id, [])
+        
+        for username in players:
+            if exclude is None or username != exclude:
+                if username in self.active_connections:
+                    try:
+                        await self.active_connections[username].send_json(message)
+                    except Exception as e:
+                        logger.error(f"Error sending to {username}: {e}")
 
 manager = ConnectionManager()
 
@@ -462,8 +573,8 @@ async def web_register(request: Request):
         return RedirectResponse(url="/register?message=Registration+failed", status_code=303)
 
 @app.websocket("/ws/{username}")
-async def websocket_endpoint(websocket: WebSocket, username: str, token: Optional[str] = None):
-    """WebSocket endpoint for real-time game updates"""
+async def websocket_endpoint(websocket: WebSocket, username: str, token: Optional[str] = None, game_id: Optional[str] = None):
+    """WebSocket endpoint for real-time game updates with game session support"""
     # Token validation (optional for development)
     valid_user = False
     if token:
@@ -481,19 +592,9 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
     await manager.connect(websocket, username)
     
     try:
-        # Get player data
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-        cursor.execute("SELECT * FROM players WHERE username = %s", (username,))
-        player = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        if player:
-            await websocket.send_json({
-                "event": "player_data",
-                "player": dict(player)
-            })
+        # Join game if specified
+        if game_id and valid_user:
+            await manager.join_game(game_id, username)
         
         # Main communication loop
         while True:
@@ -504,6 +605,9 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                 action = data["action"]
                 
                 if action == "update_position":
+                    # Add handling for game_id to only broadcast to players in same game
+                    current_game_id = data.get("game_id")
+                    
                     if "x" in data and "y" in data:
                         x = data["x"]
                         y = data["y"]
@@ -519,45 +623,74 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                         cursor.close()
                         conn.close()
                         
-                        # Broadcast to other players
-                        await manager.broadcast({
+                        # Broadcast to other players in the same game
+                        position_data = {
                             "event": "player_moved",
                             "username": username,
-                            "position": {"x": x, "y": y}
-                        }, exclude=username)
+                            "position": {"x": x, "y": y, "direction": data.get("direction", "down")}
+                        }
+                        
+                        if current_game_id:
+                            await manager.broadcast_to_game(current_game_id, position_data, exclude=username)
+                        else:
+                            await manager.broadcast(position_data, exclude=username)
                 
                 elif action == "chat_message":
                     if "message" in data:
-                        await manager.broadcast({
+                        current_game_id = data.get("game_id")
+                        chat_data = {
                             "event": "chat_message",
                             "username": username,
                             "message": data["message"],
                             "timestamp": datetime.now().isoformat()
-                        })
+                        }
+                        
+                        if current_game_id:
+                            await manager.broadcast_to_game(current_game_id, chat_data)
+                        else:
+                            await manager.broadcast(chat_data)
                 
                 elif action == "share_resource":
-                    # Handle resource sharing
+                    # Handle resource sharing within a game
                     if "resource_type" in data and "amount" in data:
                         resource_type = data["resource_type"]
                         amount = data["amount"]
+                        current_game_id = data.get("game_id")
                         
-                        # Broadcast to other players
-                        await manager.broadcast({
+                        share_data = {
                             "event": "share_resource",
                             "resource_type": resource_type,
                             "amount": amount,
                             "shared_by": username
-                        }, exclude=username)
+                        }
                         
+                        if current_game_id:
+                            await manager.broadcast_to_game(current_game_id, share_data, exclude=username)
+                        else:
+                            await manager.broadcast(share_data, exclude=username)
+                
+                elif action == "leave_game":
+                    # Handle a player leaving a game
+                    if "game_id" in data:
+                        await manager.leave_game(data["game_id"], username)
                 
                 # Add other action handlers as needed
     
     except WebSocketDisconnect:
         manager.disconnect(username)
-        await manager.broadcast({
-            "event": "player_left",
-            "username": username
-        })
+        
+        # Notify other players the user has disconnected
+        if game_id:
+            await manager.leave_game(game_id, username)
+            await manager.broadcast_to_game(game_id, {
+                "event": "player_left",
+                "username": username
+            })
+        else:
+            await manager.broadcast({
+                "event": "player_left",
+                "username": username
+            })
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(username)
@@ -831,6 +964,57 @@ async def get_public_leaderboard(limit: int = 10):
     except Exception as e:
         logger.error(f"Error fetching public leaderboard: {e}")
         raise HTTPException(status_code=500, detail=f"Error fetching leaderboard: {str(e)}")
+
+@app.post("/create_game")
+async def create_new_game(current_user: PlayerModel = Depends(get_current_user)):
+    """Create a new game session"""
+    game_id = await manager.create_game(current_user.username)
+    
+    return {
+        "game_id": game_id,
+        "host": current_user.username,
+        "created_at": datetime.now().isoformat()
+    }
+
+@app.post("/join_game/{game_id}")
+async def join_existing_game(game_id: str, current_user: PlayerModel = Depends(get_current_user)):
+    """Join an existing game session"""
+    success = await manager.join_game(game_id, current_user.username)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Game not found or cannot join")
+    
+    return {"message": "Successfully joined the game"}
+
+@app.get("/active_games")
+async def get_active_games(current_user: PlayerModel = Depends(get_current_user)):
+    """Get list of active games"""
+    games = []
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    
+    # Get games with player count
+    cursor.execute("""
+        SELECT ag.game_id, ag.host_username, ag.created_at, COUNT(gp.username) as player_count
+        FROM active_games ag
+        JOIN game_players gp ON ag.game_id = gp.game_id
+        GROUP BY ag.game_id, ag.host_username, ag.created_at
+        ORDER BY ag.created_at DESC
+    """)
+    
+    for row in cursor.fetchall():
+        games.append({
+            "game_id": row["game_id"],
+            "host": row["host_username"],
+            "created_at": row["created_at"].isoformat(),
+            "player_count": row["player_count"]
+        })
+    
+    cursor.close()
+    conn.close()
+    
+    return {"games": games}
 
 if __name__ == "__main__":
     import uvicorn

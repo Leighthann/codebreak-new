@@ -473,6 +473,11 @@ class Game:
         self.username = None
         self.load_auth_token()
 
+        # Game session data
+        self.game_id = None
+        self.is_host = False
+        self.teammates = []
+        
         # Settings
         self.settings = {
             "sound_volume": 0.7,
@@ -1209,18 +1214,14 @@ class Game:
                 "action": "share_resource",
                 "resource_type": resource_type,
                 "amount": share_amount,
-                "shared_by": self.username if hasattr(self, 'username') else "unknown"
+                "shared_by": self.username if hasattr(self, 'username') else "unknown",
+                "game_id": self.game_id  # Include game ID for sharing within a specific game
             }
-            
-            # Send to server via websocket if connected
-            #if hasattr(self, 'websocket') and self.websocket and not self.websocket.closed:
-                #asyncio.create_task(self.websocket.send(json.dumps(share_data)))
             
             # Send to server via websocket
             asyncio.create_task(self.send_websocket_message(share_data))
     
-            
-                # Show sharing notification
+            # Show sharing notification
             self.add_effect(
                     "text", self.player.x if self.player else 0, (self.player.y - 40) if self.player else 0,
                     text=f"Shared {share_amount} {resource_type.replace('_', ' ')}!",
@@ -2534,7 +2535,7 @@ class Game:
                 
                 # Initialize new state if needed
                 if self.current_state == "gameplay" and not self.player:
-                    self.initialize_game_world()
+                    asyncio.create_task(self.initialize_game_world())
                 
         elif self.fading_in:
             # Increment transition timer
@@ -2620,7 +2621,7 @@ class Game:
         except Exception as e:
             print(f"Error loading settings: {e}")
 
-    def restart_game(self):
+    async def restart_game(self):
         """Restart the game with a clean state."""
         # Clear game state flags
         if hasattr(self, 'game_over_triggered'):
@@ -2658,7 +2659,7 @@ class Game:
         self.show_crafting = False
         
         # Reinitialize game world and player
-        self.initialize_game_world()
+        await self.initialize_game_world()
         
         # Transition to gameplay with a clean fade
         self.transition_to("gameplay")
@@ -2666,7 +2667,7 @@ class Game:
         # Play game start sound
         self.play_sound("menu_select")
 
-    def initialize_game_world(self):
+    async def initialize_game_world(self):
         """Initialize the game world and player."""
         # Create world generator
         self.world_generator = WorldGenerator(WIDTH, HEIGHT, TILE_SIZE)
@@ -2682,7 +2683,6 @@ class Game:
         self.power_ups = []
         self.effects_list = []
         self.other_players = {}
-        
         
         # Load sprites
         self.load_sprites()
@@ -2700,9 +2700,7 @@ class Game:
         self.player = Player(self.player_sprite_sheet, 
                             WIDTH // 2 - TILE_SIZE // 2, 
                             HEIGHT // 2 - TILE_SIZE // 2)
-        #self.player.game_ref = self  # Add this line
         self.player.game_ref = self
-
 
         # Initialize player attributes
         self.player.health = 100
@@ -2711,51 +2709,37 @@ class Game:
         self.player.max_energy = 100
         self.player.is_dashing = False
         
-        # Initialize player inventory with DEBUG resources for testing
-        # Comment these out when testing resource collection
+        # Initialize player inventory
         self.player.inventory = {
-            "code_fragments": 0, # DEBUG: Add some resources for testing crafting
-            "energy_cores": 0,     # DEBUG: Add some resources for testing crafting
-            "data_shards": 0       # DEBUG: Add some resources for testing crafting
+            "code_fragments": 0,
+            "energy_cores": 0,
+            "data_shards": 0
         }
 
-        def register_player(username):
-            """Register the player with the server."""
-            print(f"Registering player: {username}")
-            password = f"auto_{username}_{int(time.time())}"
-            url = f"{self.server_url}/register/user"  # Use server_url from config
-            response = requests.post(url, json={"username": username, "password": password})  # Added password
-            try:
-                print(response.json())
-            except:
-                print(f"Registration failed with status code: {response.status_code}")
-                print(f"Response text: {response.text}")
-
+        # Register player
         try:
-            register_player("Player1")  # Register "Player1"
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: requests.post(
+                    f"{self.server_url}/register/user",
+                    json={"username": "Player1", "password": f"auto_Player1_{int(time.time())}"}
+                )
+            )
+            print(f"Player registration response: {response.text}")
         except Exception as e:
             print(f"Error during player registration: {e}")
         
         # Reset crafting menu state
         self.show_crafting = False
         
-        # Spawn initial resources (increased amount)
-        self.spawn_resources(10)  # Spawn resources in the world
-        
-        # Debug print available recipes and inventory
-        print("DEBUG: Player inventory initialized with:")
-        for resource, amount in self.player.inventory.items():
-            print(f"  {resource}: {amount}")
-        
-        print("DEBUG: Available crafting recipes:")
-        for item_name, recipe in self.player.crafting_recipes.items():
-            print(f"  {item_name}: {recipe}")
+        # Spawn initial resources
+        self.spawn_resources(10)
         
         # Start first wave
         self.start_new_wave()
 
         if self.auth_token and self.username:
-            asyncio.create_task(self.connect_to_server())
+            await self.connect_to_server()
         else:
             print("Not connecting to server: Missing auth token or username")
 
@@ -3639,54 +3623,6 @@ class Game:
             return False
            
 
-    # def check_resource_collection(self):
-    #     """Check if player has collected resources and share with team."""
-    #     if not self.player:
-    #         return
-            
-    #     # Collection radius
-    #     collection_radius = TILE_SIZE * 1.5
-        
-    #     # Check each resource
-    #     for resource in self.resources[:]:
-    #         # Skip if already collected
-    #         if resource.get("collected", False):
-    #             continue
-                
-    #         # Calculate distance
-    #         dist = ((self.player.x - resource["x"]) ** 2 + (self.player.y - resource["y"]) ** 2) ** 0.5
-            
-    #         if dist < collection_radius:
-    #             # Mark as collected
-    #             resource["collected"] = True
-                
-    #             # Get resource type and amount
-    #             resource_type = resource.get("type", "code_fragments")
-    #             amount = resource.get("amount", 1)
-                
-    #             # Add to player's inventory
-    #             if resource_type in self.player.inventory:
-    #                 self.player.inventory[resource_type] += amount
-                
-    #             # Share with teammates (distribute resources to other players)
-    #             self.share_resource_with_teammates(resource_type, amount)
-                
-    #             # Play sound
-    #             self.play_sound("collect")
-                
-    #             # Add visual effect
-    #             self.add_effect("text", resource["x"], resource["y"] - 20, 
-    #                         text=f"+{amount} {resource_type.replace('_', ' ').title()}", 
-    #                         color=CYAN, 
-    #                         size=16, 
-    #                         duration=1.0)
-                            
-    #             # Remove from list
-    #             self.resources.remove(resource)
-                
-    #             # Add score for collection
-    #             self.score += 10
-
     
             
     def handle_shared_resource(self, data):
@@ -3730,10 +3666,14 @@ class Game:
         
         try:
             import websockets
-            self.websocket = await websockets.connect(
-                f"ws://{self.server_url.replace('http://', '')}/ws/{self.username}?token={self.auth_token}"
-            )
-            print(f"Connected to server as {self.username}")
+            
+            # Include game_id in the WebSocket connection URL if available
+            ws_url = f"ws://{self.server_url.replace('http://', '')}/ws/{self.username}?token={self.auth_token}"
+            if self.game_id:
+                ws_url += f"&game_id={self.game_id}"
+                
+            self.websocket = await websockets.connect(ws_url)
+            print(f"Connected to server as {self.username}" + (f" in game {self.game_id}" if self.game_id else ""))
             
             # Start the background task to receive messages
             self.websocket_task = asyncio.create_task(self.websocket_listener())
@@ -3786,7 +3726,8 @@ class Game:
                 "action": "update_position",
                 "x": self.player.x,
                 "y": self.player.y,
-                "direction": self.player.direction if hasattr(self.player, "direction") else "down"
+                "direction": self.player.direction if hasattr(self.player, "direction") else "down",
+                "game_id": self.game_id  # Include game ID for position updates within a specific game
             }
             
             await self.websocket.send(json.dumps(position_data))
@@ -3857,6 +3798,45 @@ class Game:
             if username != self.username:  # Don't show our own messages twice
                 self.chat_system.add_message(username, chat_message)
                 
+    def draw_teammates_info(self):
+        """Draw information about teammates from the same game session."""
+        if not self.game_id or not self.player:
+            return
+            
+        # Create a surface for displaying teammate info
+        info_width = 200
+        info_height = 30 * (len(self.other_players) + 1)  # +1 for title
+        info_surf = pygame.Surface((info_width, info_height), pygame.SRCALPHA)
+        info_surf.fill((0, 0, 0, 150))  # Semi-transparent background
+        
+        # Draw title
+        title_text = self.font_sm.render("TEAMMATES", True, NEON_BLUE)
+        info_surf.blit(title_text, (10, 5))
+        
+        # Draw separator
+        pygame.draw.line(info_surf, NEON_BLUE, (10, 25), (info_width - 10, 25), 2)
+        
+        # Draw teammate information
+        y_offset = 30
+        for username, player_data in self.other_players.items():
+            # Skip if not in the same game (for future use)
+            if player_data.get("game_id") and player_data.get("game_id") != self.game_id:
+                continue
+                
+            # Draw username
+            name_text = self.font_sm.render(username, True, WHITE)
+            info_surf.blit(name_text, (10, y_offset))
+            
+            # Draw sharing status indicator
+            if player_data.get("has_shared", False):
+                status_text = self.font_sm.render("Shared", True, NEON_GREEN)
+                info_surf.blit(status_text, (info_width - status_text.get_width() - 10, y_offset))
+            
+            y_offset += 30
+        
+        # Blit teammate info to screen
+        self.screen.blit(info_surf, (10, 10))
+
 class ChatSystem:
     def __init__(self, font, max_messages=5):
         self.messages = []
@@ -4002,5 +3982,4 @@ class ChatSystem:
                 hint = self.font.render("Press T to chat", True, (200, 200, 200))
                 hint_rect = hint.get_rect(bottomleft=(20, HEIGHT - 10))
                 surface.blit(hint, hint_rect)
-
 
