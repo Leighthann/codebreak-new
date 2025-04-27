@@ -173,3 +173,7 @@ sudo systemctl status codebreak
 4. Use a strong password for PostgreSQL
 
 ssh -i "codebreak-key.pem" ubuntu@ec2-3-130-249-194.us-east-2.compute.amazonaws.com
+
+
+sudo -u postgres psql -d codebreak_db
+sudo -u postgres psql -d codebreak_db -c "\dt"
