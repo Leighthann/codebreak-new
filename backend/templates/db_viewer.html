@@ -162,6 +162,32 @@
                 </tbody>
             </table>
         </div>
+        
+        <div class="table-section">
+            <h2>Leaderboard</h2>
+            <table>
+                <thead>
+                    <tr>
+                        {% for column in leaderboard_columns %}
+                        <th>{{ column }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in leaderboard_data %}
+                    <tr>
+                        {% for i in range(leaderboard_columns|length) %}
+                            {% if leaderboard_columns[i] in ['date', 'last_login'] %}
+                                <td class="timestamp">{{ row[i] }}</td>
+                            {% else %}
+                                <td>{{ row[i] }}</td>
+                            {% endif %}
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </body>
 </html>

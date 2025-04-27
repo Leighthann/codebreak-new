@@ -747,6 +747,16 @@ async def db_viewer(request: Request):
         players_data = cursor.fetchall()
         players_columns = [desc[0] for desc in cursor.description]
         
+        # Get data from leaderboard table
+        cursor.execute("""
+            SELECT l.*, p.last_login 
+            FROM leaderboard l
+            LEFT JOIN players p ON l.username = p.username
+            ORDER BY l.score DESC
+        """)
+        leaderboard_data = cursor.fetchall()
+        leaderboard_columns = [desc[0] for desc in cursor.description]
+        
         cursor.close()
         conn.close()
         
@@ -756,7 +766,9 @@ async def db_viewer(request: Request):
             "users_data": users_data,
             "users_columns": users_columns,
             "players_data": players_data,
-            "players_columns": players_columns
+            "players_columns": players_columns,
+            "leaderboard_data": leaderboard_data,
+            "leaderboard_columns": leaderboard_columns
         })
     except Exception as e:
         logger.error(f"DB viewer error: {str(e)}")
