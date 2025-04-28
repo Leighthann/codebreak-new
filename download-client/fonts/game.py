@@ -7,7 +7,6 @@ import requests
 import os
 import json
 import asyncio
-import websockets
 from datetime import datetime
 from enemy import Enemy
 from effects import GameEffects
@@ -15,8 +14,6 @@ from world import WorldGenerator
 from worldObject import WorldObjects
 from player import Player
 import time
-from typing import Optional
-from main import GameConnection  # Adjust import if needed
 
 pygame.init()
 
@@ -474,14 +471,7 @@ class Game:
         self.auth_token = None
         self.username = None
         self.load_auth_token()
-        
 
-        # Game session data
-        self.game_id = None
-        self.is_host = False
-        self.teammates = []
-        self.connection: Optional[GameConnection] = None
-        
         # Settings
         self.settings = {
             "sound_volume": 0.7,
@@ -552,17 +542,6 @@ class Game:
         self.connection_attempts = 0
         self.session_id = None
         self.score_submitted = False
-        
-        # Game state
-        self.state = {
-            "game_id": None,
-            "is_host": False,
-            "player_pos": (0, 0),
-            "score": 0,
-            "health": 100,
-            "inventory": {},
-            "wave": 1
-        }
     
     def load_server_config(self):
         """Load server URL from config file or use default."""
@@ -623,6 +602,17 @@ class Game:
                         "score": entry.get("score", 0),
                         "time": 0  # Server doesn't provide this yet
                     })
+                
+                # If not enough entries, use placeholder data
+                if len(self.leaderboard_entries) < 5:
+                    placeholder_entries = [
+                        {"name": "ByteMaster", "score": 10000, "time": 1800},
+                        {"name": "CodeBreaker", "score": 8500, "time": 1500},
+                        {"name": "CyberSlice", "score": 7200, "time": 1200},
+                        {"name": "DataRunner", "score": 6800, "time": 1100},
+                        {"name": "EncryptionKey", "score": 5500, "time": 900}
+                    ]
+                    self.leaderboard_entries.extend(placeholder_entries)
                 
                 # Sort by score (descending)
                 self.leaderboard_entries.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -881,9 +871,6 @@ class Game:
         
         # Always draw UI
         self.draw_gameplay_ui()
-
-        if self.player and self.player.is_moving and hasattr(self, 'websocket') and self.websocket:
-            asyncio.create_task(self.send_position_update())
 
     def draw_crafting_ui(self):
         """Draw the crafting interface."""
@@ -1214,54 +1201,16 @@ class Game:
                          5 if resource_type == "data_shards" else 10
             })
 
-    def share_resource_with_teammates(self, resource_type, value):
-        """Share collected resources with team members through server."""
-        if not hasattr(self, 'auth_token') or not self.auth_token:
-            # Not authenticated, can't share resources
-            return
-            
-        try:
-            # Calculate share amount (half of the collected value)
-            share_amount = max(1, value // 2)
-            
-            # Prepare resource sharing data
-            share_data = {
-                "action": "share_resource",
-                "resource_type": resource_type,
-                "amount": share_amount,
-                "shared_by": self.username if hasattr(self, 'username') else "unknown",
-                "game_id": self.game_id  # Include game ID for sharing within a specific game
-            }
-            
-            # Send to server via websocket
-            asyncio.create_task(self.send_websocket_message(share_data))
-    
-            # Show sharing notification
-            self.add_effect(
-                    "text", self.player.x if self.player else 0, (self.player.y - 40) if self.player else 0,
-                    text=f"Shared {share_amount} {resource_type.replace('_', ' ')}!",
-                    color=(0, 255, 100),  # NEON_GREEN
-                    size=16,
-                    duration=1.5
-                )
-            print(f"Shared {share_amount} {resource_type} with team")
-            
-        except Exception as e:
-            print(f"Error sharing resource: {e}")
-
-    def spawn_resource_at(self, x, y, resource_type=None, amount=None, is_shared=False):
+    def spawn_resource_at(self, x, y):
         """Spawn a resource at the given location."""
-        # Determine resource type with rarity if not specified
-        if resource_type is None:
-            resource_types = ["code_fragments", "energy_cores", "data_shards"]
-            weights = [70, 25, 5]  # Higher values = more common
-            resource_type = random.choices(resource_types, weights=weights, k=1)[0]
+        # Determine resource type with rarity
+        resource_types = ["code_fragments", "energy_cores", "data_shards"]
+        weights = [70, 25, 5]  # Higher values = more common
         
-        # Determine resource value if not specified
-        if amount is None:
-            value = 1 if resource_type == "code_fragments" else 2 if resource_type == "energy_cores" else 5
-        else:
-            value = amount
+        resource_type = random.choices(resource_types, weights=weights, k=1)[0]
+        
+        # Determine resource value
+        value = 1 if resource_type == "code_fragments" else 2 if resource_type == "energy_cores" else 5
         
         # Create resource
         resource = {
@@ -1271,15 +1220,14 @@ class Game:
             "collected": False,
             "pulse": 0,
             "pulse_dir": 1,
-            "value": value,
-            "shared": is_shared  # Flag for resources shared by teammates
+            "value": value
         }
         
         # Add to resources list
         self.resources.append(resource)
         
-        # Record in database if authenticated (only for normal resources, not shared ones)
-        if hasattr(self, 'auth_token') and self.auth_token and hasattr(self, 'username') and not is_shared:
+        # Record in database if authenticated
+        if self.auth_token and self.username:
             try:
                 headers = {"Authorization": f"Bearer {self.auth_token}"}
                 data = {
@@ -1296,67 +1244,7 @@ class Game:
                 print(f"Error recording resource spawn: {e}")
         
         return resource
-    
-    # def spawn_resource_at(self, x, y):
-    #     """Spawn a resource at the given location."""
-    #     # Determine resource type with rarity
-    #     resource_types = ["code_fragments", "energy_cores", "data_shards"]
-    #     weights = [70, 25, 5]  # Higher values = more common
-        
-    #     resource_type = random.choices(resource_types, weights=weights, k=1)[0]
-        
-    #     # Determine resource value
-    #     value = 1 if resource_type == "code_fragments" else 2 if resource_type == "energy_cores" else 5
-        
-    #     # Create resource
-    #     resource = {
-    #         "type": resource_type,
-    #         "x": x,
-    #         "y": y,
-    #         "collected": False,
-    #         "pulse": 0,
-    #         "pulse_dir": 1,
-    #         "value": value
-    #     }
-        
-    #     # Add to resources list
-    #     self.resources.append(resource)
-        
-    #     # Record in database if authenticated
-    #     if self.auth_token and self.username:
-    #         try:
-    #             headers = {"Authorization": f"Bearer {self.auth_token}"}
-    #             data = {
-    #                 "type": resource_type,
-    #                 "name": resource_type,
-    #                 "x": int(x),
-    #                 "y": int(y),
-    #                 "value": value
-    #             }
-                
-    #             # Send data to server asynchronously later
-    #             asyncio.create_task(self.record_spawn_in_database(data, headers))
-    #         except Exception as e:
-    #             print(f"Error recording resource spawn: {e}")
-        
-    #     return resource
 
-
-    
-    async def send_websocket_message(self, message):
-        """Send a message to the server via websocket."""
-        if self.websocket and not self.is_closed():
-            try:
-                await self.websocket.send(json.dumps(message))
-                print(f"Message sent: {message}")
-            except Exception as e:
-                print(f"Error sending websocket message: {e}")
-
-    def is_closed(self):
-        """Check if the websocket connection is closed."""
-        return self.websocket is None or self.websocket.state != "open"
-    
-    
     async def record_spawn_in_database(self, data, headers):
         """Record a spawned item in the database asynchronously"""
         try:
@@ -1414,10 +1302,6 @@ class Game:
                         y=resource["y"],
                         value=resource["value"]
                     )
-
-                     # Share with teammates (only if not already a shared resource)
-                    if not resource.get("shared", False):
-                        self.share_resource_with_teammates(resource["type"], resource["value"])
                     
                     # Play sound
                     self.play_sound("collect")
@@ -1428,11 +1312,6 @@ class Game:
                                     color=WHITE, 
                                     size=16, 
                                     duration=1.0)
-                    self.resources.remove(resource)
-            
-                    # # Add score for collection
-                    # if hasattr(self, 'score'):
-                    #     self.score += value * 10
 
     def update_camera_shake(self, dt):
         """Update screen shake effect."""
@@ -1537,29 +1416,7 @@ class Game:
                     # Center the scaled sprite
                     offset = (scaled_size - base_size) // 2
                     world_surface.blit(scaled_sprite, (resource["x"] - offset, resource["y"] - offset))
-                
-    
-        # Add glow effect for shared resources
-                if resource.get("shared", False):
-            # Draw a pulsing glow around shared resources
-                    glow_radius = 16 + 4 * math.sin(pygame.time.get_ticks() / 200)
-                    glow_surface = pygame.Surface((glow_radius*2, glow_radius*2), pygame.SRCALPHA)
-                    pygame.draw.circle(glow_surface, (0, 255, 100, 80), (glow_radius, glow_radius), glow_radius)
-                    self.screen.blit(glow_surface, 
-                            (resource["x"] - glow_radius, resource["y"] - glow_radius))
-
-            # When drawing other players:
-            for username, player_data in self.other_players.items():
-        # ... existing code to draw other players ...
         
-            # Draw shared resource indicator if they've shared recently
-                if player_data.get("has_shared", False):
-                    indicator_text = self.font_sm.render("Sharing!", True, (0, 255, 100))  # NEON_GREEN
-                    self.screen.blit(indicator_text, 
-                            (player_data.get("x", 0) - indicator_text.get_width()//2,
-                            player_data.get("y", 0) - 60))
-                    
-        # Draw crafting stations        
         # Draw power-ups
         for power_up in self.power_ups:
             sprite = self.power_up_sprites.get(power_up["type"])
@@ -1973,7 +1830,7 @@ class Game:
                 self.leaderboard_entries.append(player_entry)
             
             # Keep only top 10
-            self.leaderboard_entries = self.leaderboard_entries[:10]
+            entries = entries[:10]
         
         # Draw entries with alternating row backgrounds
         for i, entry in enumerate(self.leaderboard_entries):
@@ -2102,8 +1959,8 @@ class Game:
                                  lambda v: self.update_setting("difficulty", v))
         
         # Draw back button
-        back_btn = Button(WIDTH // 2 - 125, HEIGHT - 80, 250, 50, "BACK",
-                        callback=lambda: self.transition_to("menu"))
+        back_btn = Button(WIDTH // 2 - 125, HEIGHT - 80, 250, 50, 
+                         lambda: self.transition_to("menu"))
         back_btn.draw(self.screen, button_font)
 
     def draw_setting_slider(self, label, x, y, value, on_change):
@@ -2550,7 +2407,7 @@ class Game:
                 
                 # Initialize new state if needed
                 if self.current_state == "gameplay" and not self.player:
-                    asyncio.create_task(self.initialize_game_world())
+                    self.initialize_game_world()
                 
         elif self.fading_in:
             # Increment transition timer
@@ -2636,7 +2493,7 @@ class Game:
         except Exception as e:
             print(f"Error loading settings: {e}")
 
-    async def restart_game(self):
+    def restart_game(self):
         """Restart the game with a clean state."""
         # Clear game state flags
         if hasattr(self, 'game_over_triggered'):
@@ -2674,7 +2531,7 @@ class Game:
         self.show_crafting = False
         
         # Reinitialize game world and player
-        await self.initialize_game_world()
+        self.initialize_game_world()
         
         # Transition to gameplay with a clean fade
         self.transition_to("gameplay")
@@ -2682,7 +2539,7 @@ class Game:
         # Play game start sound
         self.play_sound("menu_select")
 
-    async def initialize_game_world(self):
+    def initialize_game_world(self):
         """Initialize the game world and player."""
         # Create world generator
         self.world_generator = WorldGenerator(WIDTH, HEIGHT, TILE_SIZE)
@@ -2698,6 +2555,7 @@ class Game:
         self.power_ups = []
         self.effects_list = []
         self.other_players = {}
+        
         
         # Load sprites
         self.load_sprites()
@@ -2715,7 +2573,9 @@ class Game:
         self.player = Player(self.player_sprite_sheet, 
                             WIDTH // 2 - TILE_SIZE // 2, 
                             HEIGHT // 2 - TILE_SIZE // 2)
+        #self.player.game_ref = self  # Add this line
         self.player.game_ref = self
+
 
         # Initialize player attributes
         self.player.health = 100
@@ -2724,39 +2584,48 @@ class Game:
         self.player.max_energy = 100
         self.player.is_dashing = False
         
-        # Initialize player inventory
+        # Initialize player inventory with DEBUG resources for testing
+        # Comment these out when testing resource collection
         self.player.inventory = {
-            "code_fragments": 0,
-            "energy_cores": 0,
-            "data_shards": 0
+            "code_fragments": 0, # DEBUG: Add some resources for testing crafting
+            "energy_cores": 0,     # DEBUG: Add some resources for testing crafting
+            "data_shards": 0       # DEBUG: Add some resources for testing crafting
         }
 
-        # Register player
+        def register_player(username):
+            """Register the player with the server."""
+            print(f"Registering player: {username}")
+            password = f"auto_{username}_{int(time.time())}"
+            url = f"{self.server_url}/register/user"  # Use server_url from config
+            response = requests.post(url, json={"username": username, "password": password})  # Added password
+            try:
+                print(response.json())
+            except:
+                print(f"Registration failed with status code: {response.status_code}")
+                print(f"Response text: {response.text}")
+
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: requests.post(
-                    f"{self.server_url}/register/user",
-                    json={"username": "Player1", "password": f"auto_Player1_{int(time.time())}"}
-                )
-            )
-            print(f"Player registration response: {response.text}")
+            register_player("Player1")  # Register "Player1"
         except Exception as e:
             print(f"Error during player registration: {e}")
         
         # Reset crafting menu state
         self.show_crafting = False
         
-        # Spawn initial resources
-        self.spawn_resources(10)
+        # Spawn initial resources (increased amount)
+        self.spawn_resources(10)  # Spawn resources in the world
+        
+        # Debug print available recipes and inventory
+        print("DEBUG: Player inventory initialized with:")
+        for resource, amount in self.player.inventory.items():
+            print(f"  {resource}: {amount}")
+        
+        print("DEBUG: Available crafting recipes:")
+        for item_name, recipe in self.player.crafting_recipes.items():
+            print(f"  {item_name}: {recipe}")
         
         # Start first wave
         self.start_new_wave()
-
-        if self.auth_token and self.username:
-            await self.connect_to_server()
-        else:
-            print("Not connecting to server: Missing auth token or username")
 
     def load_sprites(self):
         """Load all game sprites."""
@@ -3203,7 +3072,6 @@ class Game:
             if event.type == pygame.MOUSEBUTTONDOWN:
                 for button in self.game_over_buttons:
                     if button.handle_event(event):
-                        self.play_sound("menu_select")  # Add sound feedback
                         return  # Ensure the button action is executed
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self.play_sound("menu_select")
@@ -3636,267 +3504,6 @@ class Game:
         except Exception as e:
             print(f"Error recording item collection: {e}")
             return False
-           
-
-    
-            
-    def handle_shared_resource(self, data):
-        """Process shared resource from another player."""
-        try:
-            resource_type = data.get("resource_type")
-            amount = data.get("amount", 1)
-            shared_by = data.get("shared_by", "teammate")
-            
-            # Add to player's inventory
-            if self.player and resource_type in self.player.inventory:
-                self.player.inventory[resource_type] += amount
-                
-                # Show notification
-                self.add_effect("text", self.player.x, self.player.y - 40, 
-                            text=f"Received {amount} {resource_type.replace('_', ' ')} from {shared_by}!", 
-                            color=NEON_GREEN, 
-                            size=16, 
-                            duration=2.0)
-                            
-                # Play collection sound at lower volume
-                self.effects.set_volume(0.3)  # Adjust volume if supported
-                self.effects.play_sound("collect")
-                
-                print(f"Received {amount} {resource_type} from {shared_by}")
-        except Exception as e:
-            print(f"Error processing shared resource: {e}")
-
-
-    async def clear_sharing_status(self, username, delay=5.0):
-        """Clear the sharing status of another player after a delay."""
-        await asyncio.sleep(delay)
-        if username in self.other_players:
-            self.other_players[username]["has_shared"] = False
-
-    async def connect_to_server(self):
-        """Connect to the multiplayer server via WebSocket."""
-        if not self.username or not self.auth_token:
-            print("Cannot connect: Missing username or token")
-            return False
-        
-        try:
-            import websockets
-            
-            # Include game_id in the WebSocket connection URL if available
-            ws_url = f"ws://{self.server_url.replace('http://', '')}/ws/{self.username}?token={self.auth_token}"
-            if self.game_id:
-                ws_url += f"&game_id={self.game_id}"
-                
-            self.websocket = await websockets.connect(ws_url)
-            print(f"Connected to server as {self.username}" + (f" in game {self.game_id}" if self.game_id else ""))
-            
-            # Start the background task to receive messages
-            self.websocket_task = asyncio.create_task(self.websocket_listener())
-            
-            # Send initial position to announce presence
-            if self.player:
-                await self.send_position_update()
-            
-            self.connected_to_server = True
-            return True
-            
-        except Exception as e:
-            print(f"WebSocket connection error: {e}")
-            self.connection_attempts += 1
-            return False
-
-    async def websocket_listener(self):
-        """Background task to listen for WebSocket messages."""
-        try:
-            while True:
-                if not self.websocket:
-                    break
-                    
-                message = await self.websocket.recv()
-                data = json.loads(message)
-                self.process_server_message(data)
-                
-        except websockets.exceptions.ConnectionClosed:
-            print("WebSocket connection closed")
-            self.connected_to_server = False
-        except Exception as e:
-            print(f"WebSocket error: {e}")
-            self.connected_to_server = False
-
-    async def send_position_update(self):
-        """Send player position to server."""
-        if not self.websocket or not self.player or not self.connected_to_server:
-            return
-        
-        # Only send updates periodically to avoid flooding
-        current_time = time.time()
-        if current_time - self.last_position_update < 0.1:  # 10 updates per second max
-            return
-            
-        self.last_position_update = current_time
-        
-        try:
-            # Send position data
-            position_data = {
-                "action": "update_position",
-                "x": self.player.x,
-                "y": self.player.y,
-                "direction": self.player.direction if hasattr(self.player, "direction") else "down",
-                "game_id": self.game_id  # Include game ID for position updates within a specific game
-            }
-            
-            await self.websocket.send(json.dumps(position_data))
-        except Exception as e:
-            print(f"Error sending position update: {e}")
-
-    def process_server_message(self, message):
-        """Process messages from the server."""
-        event_type = message.get("event")
-        
-        if event_type == "player_joined":
-            username = message.get("username")
-            if username != self.username:
-                # Add new player to our list of other players
-                self.other_players[username] = {
-                    "x": 0,
-                    "y": 0,
-                    "last_update": pygame.time.get_ticks(),
-                    "direction": "down",
-                    "has_shared": False
-                }
-                
-                # Show notification
-                self.add_effect("text", WIDTH//2, 40, 
-                            text=f"{username} joined the game!", 
-                            color=NEON_GREEN, 
-                            size=20, 
-                            duration=3.0)
-                self.chat_system.add_message("SYSTEM", f"{username} joined the game", system_message=True)
-                
-        elif event_type == "player_left":
-            username = message.get("username")
-            if username in self.other_players:
-                del self.other_players[username]
-                
-                # Show notification
-                self.add_effect("text", WIDTH//2, 40, 
-                            text=f"{username} left the game", 
-                            color=NEON_PINK, 
-                            size=20, 
-                            duration=3.0)
-                self.chat_system.add_message("SYSTEM", f"{username} left the game", system_message=True)
-                
-        elif event_type == "player_moved":
-            username = message.get("username")
-            position = message.get("position", {})
-            
-            if username != self.username:  # Don't update our own position
-                if username not in self.other_players:
-                    self.other_players[username] = {}
-                    
-                self.other_players[username].update({
-                    "x": position.get("x", 0),
-                    "y": position.get("y", 0),
-                    "direction": position.get("direction", "down"),
-                    "last_update": pygame.time.get_ticks()
-                })
-        
-        elif event_type == "share_resource":
-            # Process shared resource from another player
-            self.handle_shared_resource(message)
-            
-        elif event_type == "chat_message":
-            username = message.get("username", "Unknown")
-            chat_message = message.get("message", "")
-            timestamp = message.get("timestamp", datetime.now().isoformat())
-            
-            if username != self.username:  # Don't show our own messages twice
-                self.chat_system.add_message(username, chat_message)
-                
-    def draw_teammates_info(self):
-        """Draw information about teammates from the same game session."""
-        if not self.game_id or not self.player:
-            return
-            
-        # Create a surface for displaying teammate info
-        info_width = 200
-        info_height = 30 * (len(self.other_players) + 1)  # +1 for title
-        info_surf = pygame.Surface((info_width, info_height), pygame.SRCALPHA)
-        info_surf.fill((0, 0, 0, 150))  # Semi-transparent background
-        
-        # Draw title
-        title_text = self.font_sm.render("TEAMMATES", True, NEON_BLUE)
-        info_surf.blit(title_text, (10, 5))
-        
-        # Draw separator
-        pygame.draw.line(info_surf, NEON_BLUE, (10, 25), (info_width - 10, 25), 2)
-        
-        # Draw teammate information
-        y_offset = 30
-        for username, player_data in self.other_players.items():
-            # Skip if not in the same game (for future use)
-            if player_data.get("game_id") and player_data.get("game_id") != self.game_id:
-                continue
-                
-            # Draw username
-            name_text = self.font_sm.render(username, True, WHITE)
-            info_surf.blit(name_text, (10, y_offset))
-            
-            # Draw sharing status indicator
-            if player_data.get("has_shared", False):
-                status_text = self.font_sm.render("Shared", True, NEON_GREEN)
-                info_surf.blit(status_text, (info_width - status_text.get_width() - 10, y_offset))
-            
-            y_offset += 30
-        
-        # Blit teammate info to screen
-        self.screen.blit(info_surf, (10, 10))
-
-    def get_state(self):
-        """Get current game state for saving"""
-        player_state = {}
-        if hasattr(self, 'player') and self.player is not None:
-            player_state = {
-                "player_pos": (self.player.x, self.player.y),
-                "health": self.player.health,
-                "inventory": self.player.inventory
-            }
-        else:
-            player_state = {
-                "player_pos": (0, 0),
-                "health": 100,
-                "inventory": {}
-            }
-            
-        self.state.update({
-            "game_id": self.game_id,
-            "is_host": self.is_host,
-            "score": self.score if hasattr(self, 'score') else 0,
-            "wave": self.current_wave if hasattr(self, 'current_wave') else 1,
-            **player_state
-        })
-        return self.state
-    
-    def restore_state(self, state):
-        """Restore game from saved state"""
-        if not state:
-            return
-            
-        self.state = state
-        self.game_id = state.get("game_id")
-        self.is_host = state.get("is_host", False)
-        
-        if hasattr(self, 'player') and self.player is not None:
-            pos = state.get("player_pos", (0, 0))
-            self.player.x, self.player.y = pos
-            self.player.health = state.get("health", 100)
-            self.player.inventory = state.get("inventory", {})
-        
-        if hasattr(self, 'score'):
-            self.score = state.get("score", 0)
-        
-        if hasattr(self, 'current_wave'):
-            self.current_wave = state.get("wave", 1)
 
 class ChatSystem:
     def __init__(self, font, max_messages=5):
@@ -4043,4 +3650,3 @@ class ChatSystem:
                 hint = self.font.render("Press T to chat", True, (200, 200, 200))
                 hint_rect = hint.get_rect(bottomleft=(20, HEIGHT - 10))
                 surface.blit(hint, hint_rect)
-

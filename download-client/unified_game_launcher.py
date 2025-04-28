@@ -26,12 +26,9 @@ GRAY = (100, 100, 100)
 LIGHT_GRAY = (150, 150, 150)
 GREEN = (0, 255, 0)
 
-# Server URL
-SERVER_URL = "http://3.130.249.194:8000"
-
-# Auth file path
-AUTH_FILE = "auth_token.json"
-GAME_FILE = "current_game.json"
+# Server URL and auth file paths
+CONFIG_FILE = "client_config.json"
+GAME_FILE = "current_game.json"  # Used to track current game session
 
 # Load fonts
 try:
@@ -88,11 +85,12 @@ class GameList:
         self.max_visible_items = 8
         self.status = "Loading..."
         
-    def update(self, auth_data):
+    def update(self, config_data):
         """Fetch active games from server"""
         try:
-            headers = {"Authorization": f"Bearer {auth_data.get('token')}"}
-            response = requests.get(f"{SERVER_URL}/active_games", headers=headers)
+            headers = {"Authorization": f"Bearer {config_data.get('token')}"}
+            server_url = config_data.get("server_url", "http://3.130.249.194:8000")
+            response = requests.get(f"{server_url}/active_games", headers=headers)
             if response.status_code == 200:
                 self.active_games = response.json().get("games", [])
                 self.status = f"{len(self.active_games)} games available" if self.active_games else "No active games"
@@ -161,19 +159,25 @@ class GameList:
         return False
 
 def is_logged_in():
-    """Check if a valid auth token exists"""
+    """Check if a valid config with credentials exists"""
     try:
-        if os.path.exists(AUTH_FILE):
-            with open(AUTH_FILE, "r") as f:
-                auth_data = json.load(f)
-                return bool(auth_data.get('token') and auth_data.get('username'))
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r") as f:
+                config = json.load(f)
+                return bool(config.get('token') and config.get('username'))
     except:
         pass
     return False
 
 def open_login_page():
     """Open the login page in the default browser"""
-    webbrowser.open(f"{SERVER_URL}/login")
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            config = json.load(f)
+            server_url = config.get("server_url", "http://3.130.249.194:8000")
+    except:
+        server_url = "http://3.130.249.194:8000"
+    webbrowser.open(f"{server_url}/login")
 
 def check_login_status():
     """Check if login was successful by polling for auth token file"""
@@ -187,18 +191,19 @@ def check_login_status():
     
     return False
 
-def start_single_player(auth_data):
+def start_single_player(config_data):
     """Start a single player game"""
     try:
         # Create a solo game on the server
-        headers = {"Authorization": f"Bearer {auth_data.get('token')}"}
-        response = requests.post(f"{SERVER_URL}/create_game", headers=headers)
+        headers = {"Authorization": f"Bearer {config_data.get('token')}"}
+        server_url = config_data.get("server_url", "http://3.130.249.194:8000")
+        response = requests.post(f"{server_url}/create_game", headers=headers)
         
         if response.status_code == 200:
             game_data = response.json()
             game_id = game_data.get("game_id")
             
-            # Save game ID to a file
+            # Save game ID to track the current session
             with open(GAME_FILE, "w") as f:
                 json.dump({
                     "game_id": game_id,
@@ -215,20 +220,21 @@ def start_single_player(auth_data):
     except Exception as e:
         return f"Error: {str(e)}"
 
-def join_multiplayer_game(game_data, auth_data):
+def join_multiplayer_game(game_data, config_data):
     """Join the selected multiplayer game"""
     if not game_data:
         return "No game selected"
     
     try:
         game_id = game_data.get("game_id")
+        server_url = config_data.get("server_url", "http://3.130.249.194:8000")
         
         # Join the game on the server
-        headers = {"Authorization": f"Bearer {auth_data.get('token')}"}
-        response = requests.post(f"{SERVER_URL}/join_game/{game_id}", headers=headers)
+        headers = {"Authorization": f"Bearer {config_data.get('token')}"}
+        response = requests.post(f"{server_url}/join_game/{game_id}", headers=headers)
         
         if response.status_code == 200:
-            # Save game ID to a file
+            # Save game ID to track the current session
             with open(GAME_FILE, "w") as f:
                 json.dump({
                     "game_id": game_id,
@@ -245,18 +251,19 @@ def join_multiplayer_game(game_data, auth_data):
     except Exception as e:
         return f"Error: {str(e)}"
 
-def create_multiplayer_game(auth_data):
+def create_multiplayer_game(config_data):
     """Create a new multiplayer game"""
     try:
         # Create a new game on the server
-        headers = {"Authorization": f"Bearer {auth_data.get('token')}"}
-        response = requests.post(f"{SERVER_URL}/create_game", headers=headers)
+        headers = {"Authorization": f"Bearer {config_data.get('token')}"}
+        server_url = config_data.get("server_url", "http://3.130.249.194:8000")
+        response = requests.post(f"{server_url}/create_game", headers=headers)
         
         if response.status_code == 200:
             game_data = response.json()
             game_id = game_data.get("game_id")
             
-            # Save game ID to a file
+            # Save game ID to track the current session
             with open(GAME_FILE, "w") as f:
                 json.dump({
                     "game_id": game_id,
@@ -279,7 +286,7 @@ async def main():
     pygame.display.set_caption("CodeBreak Game Launcher")
     clock = pygame.time.Clock()
 
-    # Check if player is logged in
+    # Check if player is logged in via client_config.json
     if not is_logged_in():
         # Show login screen
         open_login_page()
@@ -328,31 +335,31 @@ async def main():
             print("Login timeout. Please try again.")
             sys.exit()
     
-    # User is logged in, load auth data
-    with open(AUTH_FILE, "r") as f:
-        auth_data = json.load(f)
+    # User is logged in, load config data
+    with open(CONFIG_FILE, "r") as f:
+        config_data = json.load(f)
         
-    username = auth_data.get("username", "Player")
+    username = config_data.get("username", "Player")
     
     # Create game list
     game_list = GameList(WIDTH // 2 - 300, 150, 600, 400)
-    game_list.update(auth_data)
+    game_list.update(config_data)  # Pass config_data instead of auth_data
     
     # Create buttons
     center_x = WIDTH // 2
     button_y = 580
     
     single_player_btn = Button(center_x - 260, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
-                              "PLAY SOLO", lambda: start_single_player(auth_data))
+                              "PLAY SOLO", lambda: start_single_player(config_data))
     
     create_game_btn = Button(center_x - 125 + 10, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
-                            "CREATE GAME", lambda: create_multiplayer_game(auth_data))
+                            "CREATE GAME", lambda: create_multiplayer_game(config_data))
     
     join_game_btn = Button(center_x + 145, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
-                          "JOIN GAME", lambda: join_multiplayer_game(game_list.selected_game, auth_data))
+                          "JOIN GAME", lambda: join_multiplayer_game(game_list.selected_game, config_data))
     
     refresh_btn = Button(center_x - 60, button_y + 70, 120, 40, 
-                        "REFRESH", lambda: game_list.update(auth_data))
+                        "REFRESH", lambda: game_list.update(config_data))
     
     # Status message
     status_message = ""
@@ -408,11 +415,11 @@ async def main():
             for btn in [single_player_btn, create_game_btn, join_game_btn, refresh_btn]:
                 if btn.handle_event(event):
                     if btn == single_player_btn:
-                        button_result = start_single_player(auth_data)
+                        button_result = start_single_player(config_data)
                     elif btn == create_game_btn:
-                        button_result = create_multiplayer_game(auth_data)
+                        button_result = create_multiplayer_game(config_data)
                     elif btn == join_game_btn:
-                        button_result = join_multiplayer_game(game_list.selected_game, auth_data)
+                        button_result = join_multiplayer_game(game_list.selected_game, config_data)
                     break
             
             if button_result:
