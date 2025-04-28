@@ -1,0 +1,440 @@
+import pygame
+import sys
+import json
+import requests
+import asyncio
+import os
+import subprocess
+import webbrowser
+import time
+from pathlib import Path
+
+# Initialize Pygame
+pygame.init()
+
+# Game dimensions
+WIDTH, HEIGHT = 1024, 768
+BUTTON_WIDTH, BUTTON_HEIGHT = 250, 60
+
+# Colors
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+DARK_BLUE = (10, 10, 25)
+NEON_BLUE = (0, 195, 255)
+NEON_PINK = (255, 41, 117)
+GRAY = (100, 100, 100)
+LIGHT_GRAY = (150, 150, 150)
+GREEN = (0, 255, 0)
+
+# Server URL
+SERVER_URL = "http://3.130.249.194:8000"
+
+# Auth file path
+AUTH_FILE = "auth_token.json"
+GAME_FILE = "current_game.json"
+
+# Load fonts
+try:
+    font_lg = pygame.font.Font("fonts/cyberpunk.ttf", 48)
+    font_md = pygame.font.Font("fonts/cyberpunk.ttf", 32)
+    font_sm = pygame.font.Font("fonts/cyberpunk.ttf", 24)
+except:
+    print("Warning: Could not load cyberpunk font, using system font")
+    font_lg = pygame.font.Font(None, 48)
+    font_md = pygame.font.Font(None, 32)
+    font_sm = pygame.font.Font(None, 24)
+
+class Button:
+    def __init__(self, x, y, width, height, text, callback, disabled=False):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.text = text
+        self.callback = callback
+        self.hovered = False
+        self.disabled = disabled
+        
+    def draw(self, surface):
+        # Colors
+        base_color = LIGHT_GRAY if self.disabled else NEON_BLUE
+        hover_color = LIGHT_GRAY if self.disabled else NEON_PINK
+        text_color = GRAY if self.disabled else WHITE
+        
+        # Draw button background
+        color = hover_color if self.hovered and not self.disabled else base_color
+        pygame.draw.rect(surface, color, self.rect, border_radius=5)
+        pygame.draw.rect(surface, WHITE, self.rect, 2, border_radius=5)  # Border
+        
+        # Draw text
+        text_surf = font_sm.render(self.text, True, text_color)
+        text_rect = text_surf.get_rect(center=self.rect.center)
+        surface.blit(text_surf, text_rect)
+    
+    def update(self, mouse_pos):
+        # Update hover state
+        self.hovered = self.rect.collidepoint(mouse_pos) and not self.disabled
+        
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.hovered and not self.disabled:
+                self.callback()
+                return True
+        return False
+
+class GameList:
+    def __init__(self, x, y, width, height):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.active_games = []
+        self.selected_game = None
+        self.scroll_offset = 0
+        self.max_visible_items = 8
+        self.status = "Loading..."
+        
+    def update(self, auth_data):
+        """Fetch active games from server"""
+        try:
+            headers = {"Authorization": f"Bearer {auth_data.get('token')}"}
+            response = requests.get(f"{SERVER_URL}/active_games", headers=headers)
+            if response.status_code == 200:
+                self.active_games = response.json().get("games", [])
+                self.status = f"{len(self.active_games)} games available" if self.active_games else "No active games"
+            else:
+                self.status = f"Error: {response.status_code}"
+        except Exception as e:
+            self.status = f"Connection error: {str(e)}"
+    
+    def draw(self, surface):
+        # Draw background
+        pygame.draw.rect(surface, DARK_BLUE, self.rect)
+        pygame.draw.rect(surface, NEON_BLUE, self.rect, 2)
+        
+        # Draw title
+        title = font_md.render("ACTIVE GAMES", True, WHITE)
+        surface.blit(title, (self.rect.x + 10, self.rect.y + 10))
+        
+        # Draw status
+        status_text = font_sm.render(self.status, True, GRAY)
+        surface.blit(status_text, (self.rect.x + 10, self.rect.y + 50))
+        
+        # Draw separator
+        pygame.draw.line(surface, NEON_BLUE, 
+                        (self.rect.x + 10, self.rect.y + 75),
+                        (self.rect.x + self.rect.width - 10, self.rect.y + 75), 2)
+        
+        # Draw games list
+        if not self.active_games:
+            no_games = font_sm.render("No active games found", True, WHITE)
+            surface.blit(no_games, (self.rect.x + 20, self.rect.y + 100))
+        else:
+            for i, game in enumerate(self.active_games[self.scroll_offset:self.scroll_offset + self.max_visible_items]):
+                y_pos = self.rect.y + 90 + (i * 40)
+                
+                # Draw selection highlight
+                if self.selected_game == game:
+                    pygame.draw.rect(surface, NEON_PINK, 
+                                    pygame.Rect(self.rect.x + 5, y_pos - 5, self.rect.width - 10, 40),
+                                    border_radius=5)
+                
+                # Draw game info
+                host = game.get("host", "Unknown")
+                players = game.get("player_count", 0)
+                text = f"{host}'s Game ({players} players)"
+                game_text = font_sm.render(text, True, WHITE)
+                surface.blit(game_text, (self.rect.x + 20, y_pos))
+    
+    def handle_event(self, event, mouse_pos):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if self.rect.collidepoint(mouse_pos):
+                # Check if clicked on a game entry
+                for i, game in enumerate(self.active_games[self.scroll_offset:self.scroll_offset + self.max_visible_items]):
+                    y_pos = self.rect.y + 90 + (i * 40)
+                    game_rect = pygame.Rect(self.rect.x + 5, y_pos - 5, self.rect.width - 10, 40)
+                    if game_rect.collidepoint(mouse_pos):
+                        self.selected_game = game
+                        return True
+                
+                # Scroll handling
+                if event.button == 4:  # Scroll up
+                    self.scroll_offset = max(0, self.scroll_offset - 1)
+                elif event.button == 5:  # Scroll down
+                    max_offset = max(0, len(self.active_games) - self.max_visible_items)
+                    self.scroll_offset = min(max_offset, self.scroll_offset + 1)
+        
+        return False
+
+def is_logged_in():
+    """Check if a valid auth token exists"""
+    try:
+        if os.path.exists(AUTH_FILE):
+            with open(AUTH_FILE, "r") as f:
+                auth_data = json.load(f)
+                return bool(auth_data.get('token') and auth_data.get('username'))
+    except:
+        pass
+    return False
+
+def open_login_page():
+    """Open the login page in the default browser"""
+    webbrowser.open(f"{SERVER_URL}/login")
+
+def check_login_status():
+    """Check if login was successful by polling for auth token file"""
+    start_time = time.time()
+    timeout = 300  # 5 minutes
+    
+    while time.time() - start_time < timeout:
+        if is_logged_in():
+            return True
+        time.sleep(1)
+    
+    return False
+
+def start_single_player(auth_data):
+    """Start a single player game"""
+    try:
+        # Create a solo game on the server
+        headers = {"Authorization": f"Bearer {auth_data.get('token')}"}
+        response = requests.post(f"{SERVER_URL}/create_game", headers=headers)
+        
+        if response.status_code == 200:
+            game_data = response.json()
+            game_id = game_data.get("game_id")
+            
+            # Save game ID to a file
+            with open(GAME_FILE, "w") as f:
+                json.dump({
+                    "game_id": game_id,
+                    "is_host": True,
+                    "is_solo": True
+                }, f)
+            
+            # Start the game
+            pygame.quit()
+            subprocess.Popen([sys.executable, "download-client/main.py"])
+            sys.exit()
+        else:
+            return f"Error creating game: {response.status_code}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def join_multiplayer_game(game_data, auth_data):
+    """Join the selected multiplayer game"""
+    if not game_data:
+        return "No game selected"
+    
+    try:
+        game_id = game_data.get("game_id")
+        
+        # Join the game on the server
+        headers = {"Authorization": f"Bearer {auth_data.get('token')}"}
+        response = requests.post(f"{SERVER_URL}/join_game/{game_id}", headers=headers)
+        
+        if response.status_code == 200:
+            # Save game ID to a file
+            with open(GAME_FILE, "w") as f:
+                json.dump({
+                    "game_id": game_id,
+                    "is_host": False,
+                    "is_solo": False
+                }, f)
+            
+            # Start the game
+            pygame.quit()
+            subprocess.Popen([sys.executable, "download-client/main.py"])
+            sys.exit()
+        else:
+            return f"Failed to join game: {response.status_code}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def create_multiplayer_game(auth_data):
+    """Create a new multiplayer game"""
+    try:
+        # Create a new game on the server
+        headers = {"Authorization": f"Bearer {auth_data.get('token')}"}
+        response = requests.post(f"{SERVER_URL}/create_game", headers=headers)
+        
+        if response.status_code == 200:
+            game_data = response.json()
+            game_id = game_data.get("game_id")
+            
+            # Save game ID to a file
+            with open(GAME_FILE, "w") as f:
+                json.dump({
+                    "game_id": game_id,
+                    "is_host": True,
+                    "is_solo": False
+                }, f)
+            
+            # Start the game
+            pygame.quit()
+            subprocess.Popen([sys.executable, "download-client/main.py"])
+            sys.exit()
+        else:
+            return f"Error creating game: {response.status_code}"
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+async def main():
+    """Main launcher function"""
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("CodeBreak Game Launcher")
+    clock = pygame.time.Clock()
+
+    # Check if player is logged in
+    if not is_logged_in():
+        # Show login screen
+        open_login_page()
+        
+        # Wait for login to complete or timeout
+        login_screen = True
+        start_time = time.time()
+        timeout = 300  # 5 minutes timeout
+        
+        while login_screen and time.time() - start_time < timeout:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+            
+            # Check if login completed
+            if is_logged_in():
+                login_screen = False
+                break
+                
+            # Draw waiting screen
+            screen.fill(DARK_BLUE)
+            
+            # Draw title
+            title = font_lg.render("CODEBREAK", True, NEON_BLUE)
+            title_shadow = font_lg.render("CODEBREAK", True, NEON_PINK)
+            screen.blit(title_shadow, (WIDTH // 2 - title_shadow.get_width() // 2 + 3, 150 + 3))
+            screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 150))
+            
+            # Draw login message
+            msg = font_md.render("Please login in your browser", True, WHITE)
+            screen.blit(msg, (WIDTH // 2 - msg.get_width() // 2, 250))
+            
+            # Draw timer
+            elapsed = int(time.time() - start_time)
+            remaining = timeout - elapsed
+            timer = font_sm.render(f"Waiting for login... {remaining}s", True, GRAY)
+            screen.blit(timer, (WIDTH // 2 - timer.get_width() // 2, 300))
+            
+            pygame.display.flip()
+            await asyncio.sleep(0.1)
+            
+        if time.time() - start_time >= timeout:
+            # Login timeout
+            pygame.quit()
+            print("Login timeout. Please try again.")
+            sys.exit()
+    
+    # User is logged in, load auth data
+    with open(AUTH_FILE, "r") as f:
+        auth_data = json.load(f)
+        
+    username = auth_data.get("username", "Player")
+    
+    # Create game list
+    game_list = GameList(WIDTH // 2 - 300, 150, 600, 400)
+    game_list.update(auth_data)
+    
+    # Create buttons
+    center_x = WIDTH // 2
+    button_y = 580
+    
+    single_player_btn = Button(center_x - 260, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
+                              "PLAY SOLO", lambda: start_single_player(auth_data))
+    
+    create_game_btn = Button(center_x - 125 + 10, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
+                            "CREATE GAME", lambda: create_multiplayer_game(auth_data))
+    
+    join_game_btn = Button(center_x + 145, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
+                          "JOIN GAME", lambda: join_multiplayer_game(game_list.selected_game, auth_data))
+    
+    refresh_btn = Button(center_x - 60, button_y + 70, 120, 40, 
+                        "REFRESH", lambda: game_list.update(auth_data))
+    
+    # Status message
+    status_message = ""
+    status_color = WHITE
+    
+    # Main loop
+    running = True
+    while running:
+        mouse_pos = pygame.mouse.get_pos()
+        
+        # Background
+        screen.fill(DARK_BLUE)
+        
+        # Draw grid lines effect
+        for i in range(0, WIDTH, 40):
+            pygame.draw.line(screen, (30, 30, 50), (i, 0), (i, HEIGHT), 1)
+        for i in range(0, HEIGHT, 40):
+            pygame.draw.line(screen, (30, 30, 50), (0, i), (WIDTH, i), 1)
+        
+        # Draw title
+        title = font_lg.render("CODEBREAK", True, NEON_BLUE)
+        title_shadow = font_lg.render("CODEBREAK", True, NEON_PINK)
+        screen.blit(title_shadow, (WIDTH // 2 - title_shadow.get_width() // 2 + 3, 70 + 3))
+        screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 70))
+        
+        # Draw logged in as
+        logged_in_text = font_sm.render(f"Logged in as: {username}", True, WHITE)
+        screen.blit(logged_in_text, (WIDTH - logged_in_text.get_width() - 20, 20))
+        
+        # Draw game list
+        game_list.draw(screen)
+        
+        # Update button states
+        join_game_btn.disabled = game_list.selected_game is None
+        
+        # Update and draw buttons
+        for btn in [single_player_btn, create_game_btn, join_game_btn, refresh_btn]:
+            btn.update(mouse_pos)
+            btn.draw(screen)
+        
+        # Draw status message
+        if status_message:
+            status_text = font_sm.render(status_message, True, status_color)
+            screen.blit(status_text, (WIDTH // 2 - status_text.get_width() // 2, HEIGHT - 50))
+        
+        # Handle events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            
+            # Handle button events
+            button_result = None
+            for btn in [single_player_btn, create_game_btn, join_game_btn, refresh_btn]:
+                if btn.handle_event(event):
+                    if btn == single_player_btn:
+                        button_result = start_single_player(auth_data)
+                    elif btn == create_game_btn:
+                        button_result = create_multiplayer_game(auth_data)
+                    elif btn == join_game_btn:
+                        button_result = join_multiplayer_game(game_list.selected_game, auth_data)
+                    break
+            
+            if button_result:
+                status_message = button_result
+                status_color = NEON_PINK
+            
+            # Handle game list events
+            game_list.handle_event(event, mouse_pos)
+        
+        # Update display
+        pygame.display.flip()
+        clock.tick(60)
+        await asyncio.sleep(0)
+    
+    pygame.quit()
+    sys.exit()
+
+def run_async_main():
+    """Helper function to run asyncio main"""
+    if os.name == 'nt':  # Windows
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.run(main())
+
+if __name__ == "__main__":
+    run_async_main() 

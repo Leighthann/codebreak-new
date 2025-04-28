@@ -176,4 +176,7 @@ ssh -i "codebreak-key.pem" ubuntu@ec2-3-130-249-194.us-east-2.compute.amazonaws.
 
 
 sudo -u postgres psql -d codebreak_db
+SELECT * FROM users;
 sudo -u postgres psql -d codebreak_db -c "\dt"
+
+create new tables in your PostgreSQL database on the EC2 instance
