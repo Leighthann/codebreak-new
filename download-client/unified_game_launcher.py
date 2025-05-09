@@ -216,9 +216,14 @@ def start_single_player(config_data):
             subprocess.Popen([sys.executable, "download-client/main.py"])
             sys.exit()
         else:
-            return f"Error creating game: {response.status_code}"
-    except Exception as e:
+            error_message = response.text if response.text else f"Server error: {response.status_code}"
+            return f"Error starting solo game: {error_message}"
+    except requests.exceptions.ConnectionError:
+        return "Error: Could not connect to server. Please check your internet connection."
+    except requests.exceptions.RequestException as e:
         return f"Error: {str(e)}"
+    except Exception as e:
+        return f"Unexpected error: {str(e)}"
 
 def join_multiplayer_game(game_data, config_data):
     """Join the selected multiplayer game"""
@@ -276,9 +281,14 @@ def create_multiplayer_game(config_data):
             subprocess.Popen([sys.executable, "download-client/main.py"])
             sys.exit()
         else:
-            return f"Error creating game: {response.status_code}"
-    except Exception as e:
+            error_message = response.text if response.text else f"Server error: {response.status_code}"
+            return f"Error creating game: {error_message}"
+    except requests.exceptions.ConnectionError:
+        return "Error: Could not connect to server. Please check your internet connection."
+    except requests.exceptions.RequestException as e:
         return f"Error: {str(e)}"
+    except Exception as e:
+        return f"Unexpected error: {str(e)}"
 
 async def main():
     """Main launcher function"""
@@ -352,10 +362,10 @@ async def main():
     single_player_btn = Button(center_x - 260, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
                               "PLAY SOLO", lambda: start_single_player(config_data))
     
-    create_game_btn = Button(center_x - 125 + 10, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
+    create_game_btn = Button(center_x - 125, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
                             "CREATE GAME", lambda: create_multiplayer_game(config_data))
     
-    join_game_btn = Button(center_x + 145, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
+    join_game_btn = Button(center_x + 10, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
                           "JOIN GAME", lambda: join_multiplayer_game(game_list.selected_game, config_data))
     
     refresh_btn = Button(center_x - 60, button_y + 70, 120, 40, 
