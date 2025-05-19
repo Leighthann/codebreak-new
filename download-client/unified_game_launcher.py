@@ -16,6 +16,10 @@ pygame.init()
 WIDTH, HEIGHT = 1024, 768
 BUTTON_WIDTH, BUTTON_HEIGHT = 250, 60
 
+# Window states
+WINDOWED_SIZE = (WIDTH, HEIGHT)
+is_fullscreen = False
+
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
@@ -292,9 +296,21 @@ def create_multiplayer_game(config_data):
 
 async def main():
     """Main launcher function"""
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+    global is_fullscreen
+    flags = pygame.RESIZABLE | pygame.DOUBLEBUF
+    screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
     pygame.display.set_caption("CodeBreak Game Launcher")
     clock = pygame.time.Clock()
+
+     # Function to toggle fullscreen
+    def toggle_fullscreen():
+        global is_fullscreen
+        is_fullscreen = not is_fullscreen
+        if is_fullscreen:
+            return pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+        else:
+            return pygame.display.set_mode(WINDOWED_SIZE, flags)
 
     # Check if player is logged in via client_config.json
     if not is_logged_in():
@@ -358,17 +374,18 @@ async def main():
     # Create buttons
     center_x = WIDTH // 2
     button_y = 580
-    
-    single_player_btn = Button(center_x - 260, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
+    spacing = BUTTON_WIDTH + 30  # 30 pixels between buttons
+
+    single_player_btn = Button(center_x - spacing, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
                               "PLAY SOLO", lambda: start_single_player(config_data))
     
-    create_game_btn = Button(center_x - 125, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
+    create_game_btn = Button(center_x, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
                             "CREATE GAME", lambda: create_multiplayer_game(config_data))
     
-    join_game_btn = Button(center_x + 10, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
+    join_game_btn = Button(center_x + spacing, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
                           "JOIN GAME", lambda: join_multiplayer_game(game_list.selected_game, config_data))
     
-    refresh_btn = Button(center_x - 60, button_y + 70, 120, 40, 
+    refresh_btn = Button(center_x - 60, button_y + BUTTON_HEIGHT + 30, 120, 40, 
                         "REFRESH", lambda: game_list.update(config_data))
     
     # Status message
@@ -419,6 +436,13 @@ async def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_F11 or (event.key == pygame.K_RETURN and event.mod & pygame.KMOD_ALT):
+                    screen = toggle_fullscreen()
+            
+            elif event.type == pygame.VIDEORESIZE and not is_fullscreen:
+                screen = pygame.display.set_mode((event.w, event.h), flags)
             
             # Handle button events
             button_result = None
