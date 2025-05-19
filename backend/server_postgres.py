@@ -995,9 +995,15 @@ async def create_new_game(current_user = Depends(get_current_user)):
     }
 
 @app.post("/join_game/{game_id}")
-async def join_existing_game(game_id: str, current_user: PlayerModel = Depends(get_current_user)):
+async def join_existing_game(game_id: str, current_user = Depends(get_current_user)):
     """Join an existing game session"""
-    success = await manager.join_game(game_id, current_user.username)
+    # Convert DictRow to dict if needed
+    if hasattr(current_user, 'items'):
+        username = current_user['username']
+    else:
+        username = current_user.username
+    
+    success = await manager.join_game(game_id, username)
     
     if not success:
         raise HTTPException(status_code=404, detail="Game not found or cannot join")
