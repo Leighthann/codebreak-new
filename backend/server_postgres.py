@@ -978,13 +978,19 @@ async def get_public_leaderboard(limit: int = 10):
         raise HTTPException(status_code=500, detail=f"Error fetching leaderboard: {str(e)}")
 
 @app.post("/create_game")
-async def create_new_game(current_user: PlayerModel = Depends(get_current_user)):
+async def create_new_game(current_user = Depends(get_current_user)):
     """Create a new game session"""
-    game_id = await manager.create_game(current_user.username)
+    # Convert DictRow to dict if needed
+    if hasattr(current_user, 'items'):
+        username = current_user['username']
+    else:
+        username = current_user.username
+    
+    game_id = await manager.create_game(username)
     
     return {
         "game_id": game_id,
-        "host": current_user.username,
+        "host": username,
         "created_at": datetime.now().isoformat()
     }
 
@@ -999,7 +1005,7 @@ async def join_existing_game(game_id: str, current_user: PlayerModel = Depends(g
     return {"message": "Successfully joined the game"}
 
 @app.get("/active_games")
-async def get_active_games(current_user: PlayerModel = Depends(get_current_user)):
+async def get_active_games(current_user = Depends(get_current_user)):
     """Get list of active games"""
     games = []
     
