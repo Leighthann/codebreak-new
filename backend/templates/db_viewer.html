@@ -223,14 +223,21 @@
             fetch(`/admin/delete_game/${gameId}`, {
                 method: 'DELETE',
                 headers: {
-                    // If you use token auth, add the Authorization header here
-                    //'Authorization': 'Bearer ' + localStorage.getItem('admin_token')
+                    // 'Authorization': 'Bearer ...' if needed
                 }
             })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message);
-                window.location.reload();
+            .then(response => response.json()
+                .then(data => {
+                    if (response.ok) {
+                        alert(data.message);
+                        window.location.reload();
+                    } else {
+                        alert(data.message || 'Failed to delete game session.');
+                    }
+                })
+            )
+            .catch(() => {
+                alert('Failed to delete game session (network error).');
             });
         }
     }
