@@ -123,18 +123,11 @@ async def main():
     # Initialize game connection
     connection = GameConnection(config)
     
-    # Try to connect to server
-    if not await connection.connect():
-        print("Could not establish connection to game server")
-        sys.exit(1)
-    
     try:
-        # Load or create game session
+        # Load game session
         game_data = session_manager.load_game_state()
         if not game_data:
             print("No active game session found")
-            # Here you would typically show the game menu/launcher UI
-            # For now, we'll exit
             await connection.disconnect()
             sys.exit(0)
         
@@ -148,9 +141,15 @@ async def main():
         game = Game()
         game.game_id = game_data.get("game_id")
         game.is_host = game_data.get("is_host", False)
+        game.is_solo = game_data.get("is_solo", False)
         game.connection = connection
         
-        print(f"Starting game with session ID: {game.game_id}, Host: {game.is_host}")
+        # Set server connection details
+        game.server_url = game_data.get("server_url", "http://3.130.249.194:8000")
+        game.auth_token = game_data.get("token")
+        game.username = game_data.get("username")
+        
+        print(f"Starting game with session ID: {game.game_id}, Host: {game.is_host}, Solo: {game.is_solo}")
         
         # Run the game
         await game.run()

@@ -1040,6 +1040,35 @@ async def get_active_games(current_user = Depends(get_current_user)):
     
     return {"games": games}
 
+def is_admin_user(current_user = Depends(get_current_user)):
+    # Example: check if the user has an 'is_admin' attribute or username
+    if hasattr(current_user, 'items'):
+        username = current_user['username']
+        is_admin = current_user.get('is_admin', False)
+    else:
+        username = current_user.username
+        is_admin = getattr(current_user, 'is_admin', False)
+    if not is_admin and username != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+    return current_user
+
+@app.delete("/admin/delete_game/{game_id}")
+async def admin_delete_game(game_id: str, current_user = Depends(is_admin_user)):
+    """Admin endpoint to delete a game session by game_id"""
+    # Remove from in-memory manager
+    if game_id in manager.active_games:
+        del manager.active_games[game_id]
+    if game_id in manager.game_players:
+        del manager.game_players[game_id]
+    # Remove from database
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM active_games WHERE game_id = %s", (game_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return {"message": f"Game {game_id} deleted"}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)

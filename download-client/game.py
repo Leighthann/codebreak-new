@@ -463,7 +463,12 @@ class Game:
         self.fading_out = False
         self.next_state = None
         self.show_crafting = False  # New flag for crafting UI
-
+        
+        # Game session info
+        self.game_id = None
+        self.is_host = False
+        self.is_solo = False  # Add is_solo flag
+        
         # Leaderboard data
         self.leaderboard_entries = []
         self.leaderboard_last_update = 0

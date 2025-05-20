@@ -7,6 +7,7 @@ import os
 import subprocess
 import webbrowser
 import time
+import pyperclip
 from pathlib import Path
 
 # Initialize Pygame
@@ -162,6 +163,102 @@ class GameList:
         
         return False
 
+class PopupDialog:
+    def __init__(self, title, game_id, screen, clock, width=600, height=250):
+        self.width = width
+        self.height = height
+        self.title = title
+        self.game_id = game_id
+        self.screen = screen
+        self.clock = clock
+        self.rect = pygame.Rect(WIDTH//2 - width//2, HEIGHT//2 - height//2, width, height)
+        self.copy_btn = Button(self.rect.x + width//2 - 100, self.rect.y + height - 60, 200, 40, "COPY ID", self.copy_to_clipboard)
+        self.close_btn = Button(self.rect.x + width//2 - 100, self.rect.y + height - 110, 200, 40, "CLOSE", self.close)
+        self.is_open = True
+        self.copied = False
+        self.copy_text = "COPY ID"
+        
+    def copy_to_clipboard(self):
+        try:
+            pyperclip.copy(self.game_id)
+            self.copied = True
+            self.copy_text = "COPIED!"
+        except:
+            self.copy_text = "COPY FAILED"
+    
+    def close(self):
+        self.is_open = False
+    
+    def draw(self):
+        # Draw semi-transparent background
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 128))
+        self.screen.blit(overlay, (0, 0))
+        
+        # Draw popup background
+        pygame.draw.rect(self.screen, DARK_BLUE, self.rect)
+        pygame.draw.rect(self.screen, NEON_BLUE, self.rect, 2)
+        
+        # Draw title
+        title = font_md.render(self.title, True, WHITE)
+        self.screen.blit(title, (self.rect.x + 20, self.rect.y + 20))
+        
+        # Draw Game ID on its own line
+        id_label = font_sm.render("Game ID:", True, NEON_BLUE)
+        self.screen.blit(id_label, (self.rect.x + 20, self.rect.y + 70))
+        id_value = font_sm.render(self.game_id, True, WHITE)
+        self.screen.blit(id_value, (self.rect.x + 120, self.rect.y + 70))
+        
+        # Draw instructions on a new line
+        instructions = font_sm.render("Share this ID with other players to join your game.", True, NEON_BLUE)
+        self.screen.blit(instructions, (self.rect.x + 20, self.rect.y + 120))
+        
+        # Draw buttons
+        self.copy_btn.text = self.copy_text
+        self.copy_btn.draw(self.screen)
+        self.close_btn.draw(self.screen)
+    
+    def handle_event(self, event, mouse_pos):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            self.copy_btn.update(mouse_pos)
+            self.close_btn.update(mouse_pos)
+            if self.copy_btn.handle_event(event):
+                return True
+            if self.close_btn.handle_event(event):
+                return True
+        return False
+    
+    def show(self):
+        while self.is_open:
+            mouse_pos = pygame.mouse.get_pos()
+            
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                self.handle_event(event, mouse_pos)
+            
+            # Draw everything
+            self.screen.fill(DARK_BLUE)
+            
+            # Draw grid lines effect
+            for i in range(0, WIDTH, 40):
+                pygame.draw.line(self.screen, (30, 30, 50), (i, 0), (i, HEIGHT), 1)
+            for i in range(0, HEIGHT, 40):
+                pygame.draw.line(self.screen, (30, 30, 50), (0, i), (WIDTH, i), 1)
+            
+            # Draw title
+            title = font_lg.render("CODEBREAK", True, NEON_BLUE)
+            title_shadow = font_lg.render("CODEBREAK", True, NEON_PINK)
+            self.screen.blit(title_shadow, (WIDTH // 2 - title_shadow.get_width() // 2 + 3, 70 + 3))
+            self.screen.blit(title, (WIDTH // 2 - title.get_width() // 2, 70))
+            
+            # Draw popup
+            self.draw()
+            
+            pygame.display.flip()
+            self.clock.tick(60)
+
 def is_logged_in():
     """Check if a valid config with credentials exists"""
     try:
@@ -198,36 +295,23 @@ def check_login_status():
 def start_single_player(config_data):
     """Start a single player game"""
     try:
-        # Create a solo game on the server
-        headers = {"Authorization": f"Bearer {config_data.get('token')}"}
-        server_url = config_data.get("server_url", "http://3.130.249.194:8000")
-        response = requests.post(f"{server_url}/create_game", headers=headers)
+        # Save game state for solo play
+        with open(GAME_FILE, "w") as f:
+            json.dump({
+                "is_host": True,
+                "is_solo": True,
+                "server_url": config_data.get("server_url", "http://3.130.249.194:8000"),
+                "token": config_data.get("token"),
+                "username": config_data.get("username")
+            }, f)
         
-        if response.status_code == 200:
-            game_data = response.json()
-            game_id = game_data.get("game_id")
-            
-            # Save game ID to track the current session
-            with open(GAME_FILE, "w") as f:
-                json.dump({
-                    "game_id": game_id,
-                    "is_host": True,
-                    "is_solo": True
-                }, f)
-            
-            # Start the game
-            pygame.quit()
-            subprocess.Popen([sys.executable, "download-client/main.py"])
-            sys.exit()
-        else:
-            error_message = response.text if response.text else f"Server error: {response.status_code}"
-            return f"Error starting solo game: {error_message}"
-    except requests.exceptions.ConnectionError:
-        return "Error: Could not connect to server. Please check your internet connection."
-    except requests.exceptions.RequestException as e:
-        return f"Error: {str(e)}"
+        # Start the game
+        pygame.quit()
+        # Use the correct path to main.py
+        subprocess.Popen([sys.executable, "main.py"])
+        sys.exit()
     except Exception as e:
-        return f"Unexpected error: {str(e)}"
+        return f"Error starting solo game: {str(e)}"
 
 def join_multiplayer_game(game_data, config_data):
     """Join the selected multiplayer game"""
@@ -248,19 +332,24 @@ def join_multiplayer_game(game_data, config_data):
                 json.dump({
                     "game_id": game_id,
                     "is_host": False,
-                    "is_solo": False
+                    "is_solo": False,
+                    "server_url": server_url,
+                    "token": config_data.get("token"),
+                    "username": config_data.get("username")
                 }, f)
             
             # Start the game
             pygame.quit()
-            subprocess.Popen([sys.executable, "download-client/main.py"])
+            # Use the correct path to main.py
+            subprocess.Popen([sys.executable, "main.py"])
             sys.exit()
         else:
-            return f"Failed to join game: {response.status_code}"
+            error_message = response.text if response.text else f"Server error: {response.status_code}"
+            return f"Failed to join game: {error_message}"
     except Exception as e:
         return f"Error: {str(e)}"
 
-def create_multiplayer_game(config_data):
+def create_multiplayer_game(config_data, screen, clock):
     """Create a new multiplayer game"""
     try:
         # Create a new game on the server
@@ -277,12 +366,26 @@ def create_multiplayer_game(config_data):
                 json.dump({
                     "game_id": game_id,
                     "is_host": True,
-                    "is_solo": False
+                    "is_solo": False,
+                    "server_url": server_url,
+                    "token": config_data.get("token"),
+                    "username": config_data.get("username")
                 }, f)
             
-            # Start the game
+            # Create and show popup with game ID
+            popup = PopupDialog(
+                "Game Created!",
+                game_id,
+                screen,
+                clock
+            )
+            
+            # Show popup and wait for user to close it
+            popup.show()
+            
+            # Start the game after popup is closed
             pygame.quit()
-            subprocess.Popen([sys.executable, "download-client/main.py"])
+            subprocess.Popen([sys.executable, "main.py"])
             sys.exit()
         else:
             error_message = response.text if response.text else f"Server error: {response.status_code}"
@@ -380,7 +483,7 @@ async def main():
                               "PLAY SOLO", lambda: start_single_player(config_data))
     
     create_game_btn = Button(center_x, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
-                            "CREATE GAME", lambda: create_multiplayer_game(config_data))
+                            "CREATE GAME", lambda: create_multiplayer_game(config_data, screen, clock))
     
     join_game_btn = Button(center_x + spacing, button_y, BUTTON_WIDTH, BUTTON_HEIGHT, 
                           "JOIN GAME", lambda: join_multiplayer_game(game_list.selected_game, config_data))
@@ -451,7 +554,7 @@ async def main():
                     if btn == single_player_btn:
                         button_result = start_single_player(config_data)
                     elif btn == create_game_btn:
-                        button_result = create_multiplayer_game(config_data)
+                        button_result = create_multiplayer_game(config_data, screen, clock)
                     elif btn == join_game_btn:
                         button_result = join_multiplayer_game(game_list.selected_game, config_data)
                     break
