@@ -353,7 +353,7 @@ async def register_user(user: UserCreate):
     """Register a new user with username and password"""
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         
         # Check if username exists
         cursor.execute("SELECT username FROM users WHERE username = %s", (user.username,))
@@ -728,7 +728,7 @@ async def db_viewer(request: Request):
     try:
         # Get list of tables
         conn = get_db_connection()
-        cursor = conn.cursor()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cursor.execute("""
             SELECT table_name 
             FROM information_schema.tables 
