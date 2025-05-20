@@ -718,15 +718,34 @@ async def process_admin_login(request: Request):
             # Issue a JWT token for admin
             access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
             access_token = create_access_token(
-                data={"sub": username, "is_admin": True}, expires_delta=access_token_expires
+                data={"sub": username, "is_admin": True}, 
+                expires_delta=access_token_expires
             )
-            # Return the token as JSON (for AJAX) or render the template with the token
-            return {"access_token": access_token, "token_type": "bearer"}
+            
+            # Return JSON response with token
+            return JSONResponse(
+                content={
+                    "access_token": access_token,
+                    "token_type": "bearer",
+                    "message": "Login successful"
+                },
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+                }
+            )
         else:
-            return JSONResponse(status_code=401, content={"message": "Invalid credentials"})
+            return JSONResponse(
+                status_code=401,
+                content={"message": "Invalid credentials"}
+            )
     except Exception as e:
         logger.error(f"Admin login error: {str(e)}")
-        return JSONResponse(status_code=500, content={"message": "Error logging in"})
+        return JSONResponse(
+            status_code=500,
+            content={"message": "Error logging in"}
+        )
 
 @app.get("/db-viewer", response_class=HTMLResponse)
 async def db_viewer(request: Request):

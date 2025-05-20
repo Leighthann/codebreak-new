@@ -95,6 +95,19 @@
             white-space: normal;
             word-wrap: break-word;
         }
+        .token-status {
+            background-color: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 20px;
+            font-size: 0.9em;
+        }
+        .token-status.valid {
+            border: 1px solid #4CAF50;
+        }
+        .token-status.invalid {
+            border: 1px solid #ff5555;
+        }
     </style>
 </head>
 <body>
@@ -105,6 +118,10 @@
                 <a href="/admin" class="back-button">Logout</a>
                 <button onclick="window.location.reload()" class="refresh-btn">Refresh Data</button>
             </div>
+        </div>
+        
+        <div id="token-status" class="token-status">
+            Checking authentication...
         </div>
         
         <div class="table-section">
@@ -218,39 +235,65 @@
         </div>
     </div>
     <script>
-    function handleAdminLogin(response) {
-        if (response.access_token) {
-            localStorage.setItem('admin_token', response.access_token);
-            // Redirect or reload as needed
+    // Check and display token status
+    function checkTokenStatus() {
+        const token = localStorage.getItem('admin_token');
+        const statusDiv = document.getElementById('token-status');
+        
+        if (token) {
+            statusDiv.textContent = 'Authentication token found';
+            statusDiv.className = 'token-status valid';
         } else {
-            alert('Login failed');
+            statusDiv.textContent = 'No authentication token found. Please log in again.';
+            statusDiv.className = 'token-status invalid';
+            setTimeout(() => {
+                window.location.href = '/admin';
+            }, 2000);
         }
     }
+
+    // Call this when page loads
+    checkTokenStatus();
 
     function deleteGame(gameId) {
         if (confirm('Are you sure you want to delete this game session?')) {
             const token = localStorage.getItem('admin_token');
+            if (!token) {
+                alert('No authentication token found. Please log in again.');
+                window.location.href = '/admin';
+                return;
+            }
+
             fetch(`/admin/delete_game/${gameId}`, {
                 method: 'DELETE',
                 headers: {
-                    'Authorization': 'Bearer ' + token
+                    'Authorization': `Bearer ${token}`
                 }
             })
-            .then(response => response.json()
-                .then(data => {
-                    if (response.ok) {
-                        alert(data.message);
-                        window.location.reload();
-                    } else {
-                        alert(data.message || 'Failed to delete game session.');
+            .then(response => {
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        throw new Error('Authentication failed. Please log in again.');
                     }
-                })
-            )
-            .catch(() => {
-                alert('Failed to delete game session (network error).');
+                    return response.json().then(data => {
+                        throw new Error(data.message || 'Failed to delete game session.');
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                alert(data.message || 'Game session deleted successfully.');
+                window.location.reload();
+            })
+            .catch(error => {
+                alert(error.message);
+                if (error.message.includes('Authentication failed')) {
+                    window.location.href = '/admin';
+                }
             });
         }
     }
     </script>
 </body>
+</html>
 </html>
