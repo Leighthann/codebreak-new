@@ -757,6 +757,23 @@ async def db_viewer(request: Request):
         leaderboard_data = cursor.fetchall()
         leaderboard_columns = [desc[0] for desc in cursor.description]
         
+        # Fetch active games from the database
+        cursor.execute("""
+            SELECT ag.game_id, ag.host_username, ag.created_at, COUNT(gp.username) as player_count
+            FROM active_games ag
+            JOIN game_players gp ON ag.game_id = gp.game_id
+            GROUP BY ag.game_id, ag.host_username, ag.created_at
+            ORDER BY ag.created_at DESC
+        """)
+        games = []
+        for row in cursor.fetchall():
+            games.append({
+                "game_id": row["game_id"],
+                "host": row["host_username"],
+                "created_at": row["created_at"].isoformat(),
+                "player_count": row["player_count"]
+            })
+        
         cursor.close()
         conn.close()
         
@@ -768,7 +785,8 @@ async def db_viewer(request: Request):
             "players_data": players_data,
             "players_columns": players_columns,
             "leaderboard_data": leaderboard_data,
-            "leaderboard_columns": leaderboard_columns
+            "leaderboard_columns": leaderboard_columns,
+            "games": games
         })
     except Exception as e:
         logger.error(f"DB viewer error: {str(e)}")
