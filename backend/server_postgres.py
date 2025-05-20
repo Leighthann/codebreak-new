@@ -713,14 +713,24 @@ async def process_admin_login(request: Request):
         username = form_data.get("username")
         password = form_data.get("password")
         
+        logger.info(f"Admin login attempt for: {username}")
+        
         # Very simple admin authentication - consider using a more secure method
         if username == "admin" and password == "L3igh-@Ann22":
-            # Issue a JWT token for admin
+            # Issue a JWT token for admin with explicit admin claim
             access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            token_data = {
+                "sub": username,
+                "is_admin": True,
+                "type": "admin"
+            }
+            
             access_token = create_access_token(
-                data={"sub": username, "is_admin": True}, 
+                data=token_data,
                 expires_delta=access_token_expires
             )
+            
+            logger.info(f"Admin login successful for: {username}")
             
             # Return JSON response with token
             return JSONResponse(
@@ -736,6 +746,7 @@ async def process_admin_login(request: Request):
                 }
             )
         else:
+            logger.warning(f"Failed admin login attempt for: {username}")
             return JSONResponse(
                 status_code=401,
                 content={"message": "Invalid credentials"}
@@ -1083,18 +1094,21 @@ async def get_active_games(current_user = Depends(get_current_user)):
     
     return {"games": games}
 
-def is_admin_user(current_user = Depends(get_current_user)):
+def is_admin_user(token: str = Depends(oauth2_scheme)):
     """Check if the user has admin privileges"""
     try:
-        # Extract username and admin status
-        if hasattr(current_user, 'items'):
-            username = current_user['username']
-            is_admin = current_user.get('is_admin', False)
-        else:
-            username = current_user.username
-            is_admin = getattr(current_user, 'is_admin', False)
+        # Decode the JWT token
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username = payload.get("sub")
+        is_admin = payload.get("is_admin", False)
         
         logger.info(f"Admin check for user: {username}, is_admin: {is_admin}")
+        
+        if not username:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token"
+            )
         
         if not is_admin and username != "admin":
             logger.warning(f"Unauthorized admin access attempt by: {username}")
@@ -1102,7 +1116,21 @@ def is_admin_user(current_user = Depends(get_current_user)):
                 status_code=403,
                 detail="Not authorized for admin actions"
             )
-        return current_user
+            
+        return {"username": username, "is_admin": is_admin}
+        
+    except jwt.ExpiredSignatureError:
+        logger.error("Token has expired")
+        raise HTTPException(
+            status_code=401,
+            detail="Token has expired"
+        )
+    except jwt.PyJWTError as e:
+        logger.error(f"JWT validation error: {str(e)}")
+        raise HTTPException(
+            status_code=401,
+            detail="Could not validate credentials"
+        )
     except Exception as e:
         logger.error(f"Admin authorization error: {str(e)}")
         raise HTTPException(
