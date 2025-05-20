@@ -9,105 +9,131 @@
             font-family: 'Arial', sans-serif;
             background-color: #0a0a19;
             color: #fff;
-            text-align: center;
             margin: 0;
-            padding: 0;
+            padding: 20px;
             display: flex;
-            align-items: center;
             justify-content: center;
-            height: 100vh;
+            align-items: center;
+            min-height: 100vh;
         }
         .login-container {
-            background-color: rgba(0, 0, 0, 0.6);
-            border-radius: 10px;
-            padding: 40px;
-            box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
-            width: 350px;
+            background-color: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            padding: 30px;
+            width: 100%;
+            max-width: 400px;
         }
         h1 {
             color: #ff0000;
-            margin-bottom: 20px;
-            text-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+            text-shadow: 0 0 5px rgba(255, 0, 0, 0.5);
+            text-align: center;
+            margin-bottom: 30px;
         }
         .form-group {
             margin-bottom: 20px;
-            text-align: left;
         }
         label {
             display: block;
-            margin-bottom: 5px;
-            font-size: 14px;
+            margin-bottom: 8px;
+            color: #ff5555;
         }
-        input[type="text"], input[type="password"] {
+        input {
             width: 100%;
             padding: 10px;
-            border: 1px solid #000;
+            border: 1px solid #333;
             border-radius: 4px;
-            background-color: rgba(0, 0, 0, 0.3);
+            background-color: rgba(255, 255, 255, 0.1);
             color: #fff;
-            font-size: 16px;
+            box-sizing: border-box;
         }
-        .submit-btn {
-            background-color: #ff0000;
-            color: #fff;
+        input:focus {
+            outline: none;
+            border-color: #ff5555;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: #ff5555;
+            color: white;
             border: none;
-            padding: 12px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 16px;
-            width: 100%;
-        }
-        .submit-btn:hover {
-            background-color: #cc0000;
-        }
-        .message {
-            padding: 10px;
-            margin-bottom: 20px;
             border-radius: 4px;
-            background-color: rgba(255, 0, 0, 0.2);
-            border: 1px solid rgba(255, 0, 0, 0.3);
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
         }
-        .back-link {
-            margin-top: 20px;
-            font-size: 14px;
+        button:hover {
+            background-color: #ff3333;
         }
-        .back-link a {
-            color: #aaa;
-            text-decoration: none;
+        #login-error {
+            color: #ff5555;
+            text-align: center;
+            margin-top: 15px;
+            min-height: 20px;
         }
-        .back-link a:hover {
-            text-decoration: underline;
+        .loading {
+            opacity: 0.7;
+            cursor: not-allowed;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
-        <h1>ADMIN PANEL</h1>
-        
-        {% if message %}
-        <div class="message">
-            {{ message }}
-        </div>
-        {% endif %}
-        
-        <form action="/admin-login" method="POST">
+        <h1>Admin Login</h1>
+        <form id="admin-login-form">
             <div class="form-group">
-                <label for="username">Admin Username</label>
+                <label for="username">Username</label>
                 <input type="text" id="username" name="username" required>
             </div>
-            
             <div class="form-group">
-                <label for="password">Admin Password</label>
+                <label for="password">Password</label>
                 <input type="password" id="password" name="password" required>
             </div>
-            
-            <button type="submit" class="submit-btn">ACCESS DATABASE</button>
+            <button type="submit" id="login-button">Login</button>
         </form>
-        
-        <div class="back-link">
-            <a href="/login">&larr; Back to regular login</a>
-        </div>
+        <div id="login-error"></div>
     </div>
+
+    <script>
+        document.getElementById('admin-login-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const form = e.target;
+            const button = document.getElementById('login-button');
+            const errorDiv = document.getElementById('login-error');
+            
+            // Disable form while processing
+            button.classList.add('loading');
+            button.textContent = 'Logging in...';
+            errorDiv.textContent = '';
+            
+            const formData = new FormData(form);
+            const data = new URLSearchParams(formData);
+
+            try {
+                const response = await fetch('/admin-login', {
+                    method: 'POST',
+                    body: data,
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    }
+                });
+
+                const result = await response.json();
+                
+                if (response.ok && result.access_token) {
+                    localStorage.setItem('admin_token', result.access_token);
+                    window.location.href = '/db-viewer';
+                } else {
+                    errorDiv.textContent = result.message || 'Login failed. Please check your credentials.';
+                    button.classList.remove('loading');
+                    button.textContent = 'Login';
+                }
+            } catch (err) {
+                errorDiv.textContent = 'Network error. Please try again.';
+                button.classList.remove('loading');
+                button.textContent = 'Login';
+            }
+        });
+    </script>
 </body>
 </html>
