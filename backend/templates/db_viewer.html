@@ -218,12 +218,22 @@
         </div>
     </div>
     <script>
+    function handleAdminLogin(response) {
+        if (response.access_token) {
+            localStorage.setItem('admin_token', response.access_token);
+            // Redirect or reload as needed
+        } else {
+            alert('Login failed');
+        }
+    }
+
     function deleteGame(gameId) {
         if (confirm('Are you sure you want to delete this game session?')) {
+            const token = localStorage.getItem('admin_token');
             fetch(`/admin/delete_game/${gameId}`, {
                 method: 'DELETE',
                 headers: {
-                    // 'Authorization': 'Bearer ...' if needed
+                    'Authorization': 'Bearer ' + token
                 }
             })
             .then(response => response.json()

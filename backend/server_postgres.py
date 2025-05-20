@@ -6,7 +6,7 @@ This version uses direct psycopg2 connections for simplicity.
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Query, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -707,7 +707,7 @@ async def admin_login(request: Request, message: Optional[str] = None):
 
 @app.post("/admin-login")
 async def process_admin_login(request: Request):
-    """Process admin login"""
+    """Process admin login and return a JWT token"""
     try:
         form_data = await request.form()
         username = form_data.get("username")
@@ -715,12 +715,18 @@ async def process_admin_login(request: Request):
         
         # Very simple admin authentication - consider using a more secure method
         if username == "admin" and password == "L3igh-@Ann22":
-            return RedirectResponse(url="/db-viewer", status_code=303)
+            # Issue a JWT token for admin
+            access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+            access_token = create_access_token(
+                data={"sub": username, "is_admin": True}, expires_delta=access_token_expires
+            )
+            # Return the token as JSON (for AJAX) or render the template with the token
+            return {"access_token": access_token, "token_type": "bearer"}
         else:
-            return RedirectResponse(url="/admin?message=Invalid+credentials", status_code=303)
+            return JSONResponse(status_code=401, content={"message": "Invalid credentials"})
     except Exception as e:
         logger.error(f"Admin login error: {str(e)}")
-        return RedirectResponse(url="/admin?message=Error+logging+in", status_code=303)
+        return JSONResponse(status_code=500, content={"message": "Error logging in"})
 
 @app.get("/db-viewer", response_class=HTMLResponse)
 async def db_viewer(request: Request):
