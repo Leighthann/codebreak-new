@@ -1084,33 +1084,67 @@ async def get_active_games(current_user = Depends(get_current_user)):
     return {"games": games}
 
 def is_admin_user(current_user = Depends(get_current_user)):
-    # Example: check if the user has an 'is_admin' attribute or username
-    if hasattr(current_user, 'items'):
-        username = current_user['username']
-        is_admin = current_user.get('is_admin', False)
-    else:
-        username = current_user.username
-        is_admin = getattr(current_user, 'is_admin', False)
-    if not is_admin and username != "admin":
-        raise HTTPException(status_code=403, detail="Not authorized")
-    return current_user
+    """Check if the user has admin privileges"""
+    try:
+        # Extract username and admin status
+        if hasattr(current_user, 'items'):
+            username = current_user['username']
+            is_admin = current_user.get('is_admin', False)
+        else:
+            username = current_user.username
+            is_admin = getattr(current_user, 'is_admin', False)
+        
+        logger.info(f"Admin check for user: {username}, is_admin: {is_admin}")
+        
+        if not is_admin and username != "admin":
+            logger.warning(f"Unauthorized admin access attempt by: {username}")
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized for admin actions"
+            )
+        return current_user
+    except Exception as e:
+        logger.error(f"Admin authorization error: {str(e)}")
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication failed"
+        )
 
 @app.delete("/admin/delete_game/{game_id}")
 async def admin_delete_game(game_id: str, current_user = Depends(is_admin_user)):
     """Admin endpoint to delete a game session by game_id"""
-    # Remove from in-memory manager
-    if game_id in manager.active_games:
-        del manager.active_games[game_id]
-    if game_id in manager.game_players:
-        del manager.game_players[game_id]
-    # Remove from database
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM active_games WHERE game_id = %s", (game_id,))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return {"message": f"Game {game_id} deleted"}
+    try:
+        logger.info(f"Attempting to delete game {game_id} by admin user")
+        
+        # Remove from in-memory manager
+        if game_id in manager.active_games:
+            del manager.active_games[game_id]
+        if game_id in manager.game_players:
+            del manager.game_players[game_id]
+            
+        # Remove from database
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # First delete from game_players (due to foreign key constraint)
+        cursor.execute("DELETE FROM game_players WHERE game_id = %s", (game_id,))
+        
+        # Then delete from active_games
+        cursor.execute("DELETE FROM active_games WHERE game_id = %s", (game_id,))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        logger.info(f"Successfully deleted game {game_id}")
+        return {"message": f"Game {game_id} deleted successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error deleting game {game_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete game: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn

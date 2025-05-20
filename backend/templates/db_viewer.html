@@ -264,30 +264,38 @@
                 return;
             }
 
+            console.log('Attempting to delete game with ID:', gameId);
+            console.log('Using token:', token.substring(0, 20) + '...');  // Log part of token for debugging
+
             fetch(`/admin/delete_game/${gameId}`, {
                 method: 'DELETE',
                 headers: {
-                    'Authorization': `Bearer ${token}`
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
                 }
             })
-            .then(response => {
+            .then(async response => {
+                console.log('Response status:', response.status);
+                const data = await response.json();
+                console.log('Response data:', data);
+
                 if (!response.ok) {
                     if (response.status === 401) {
                         throw new Error('Authentication failed. Please log in again.');
                     }
-                    return response.json().then(data => {
-                        throw new Error(data.message || 'Failed to delete game session.');
-                    });
+                    throw new Error(data.message || 'Failed to delete game session.');
                 }
-                return response.json();
+                return data;
             })
             .then(data => {
                 alert(data.message || 'Game session deleted successfully.');
                 window.location.reload();
             })
             .catch(error => {
+                console.error('Delete error:', error);
                 alert(error.message);
                 if (error.message.includes('Authentication failed')) {
+                    localStorage.removeItem('admin_token');  // Clear invalid token
                     window.location.href = '/admin';
                 }
             });
@@ -295,5 +303,4 @@
     }
     </script>
 </body>
-</html>
 </html>
