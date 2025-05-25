@@ -1,10 +1,8 @@
 """
-Script to install dependencies for PostgreSQL-based CodeBreak application
+Script to install dependencies for CodeBreak game client
 """
 import subprocess
 import sys
-import os
-import time
 import socket
 
 def check_internet_connection():
@@ -19,19 +17,11 @@ def check_internet_connection():
 def install_dependencies():
     """Install required dependencies with error handling"""
     packages = [
-        "fastapi",
-        "uvicorn",
-        "sqlalchemy",
-        "psycopg2-binary",
-        "python-jose[cryptography]",
-        "passlib[bcrypt]",
-        "asyncpg",
-        "python-dotenv",
-        "pyjwt",
-        "requests",
-        "psycopg2-binary",
         "pygame",
-        "websockets"
+        "websockets",
+        "requests",
+        "python-dotenv",
+        "pyperclip"
     ]    
     python_exe = sys.executable
     
@@ -80,38 +70,13 @@ def install_dependencies():
     print("\nAll dependencies installed successfully!")
     return True
 
-def setup_database_connection():
-    """Create a .env file for database configuration"""
-    print("Setting up database connection configuration...")
-    
-    # Create .env file with PostgreSQL connection details
-    with open(".env", "w") as f:
-        f.write("""# Database Configuration
-DB_USER=postgres
-DB_PASSWORD=your-password
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=codebreak_db
-DATABASE_URL=postgresql+asyncpg://postgres:your-password@localhost:5432/codebreak_db
-SECRET_KEY=your-secure-random-secret-key
-""")
-    
-    print("Database configuration created. Edit .env file to update your credentials.")
-    return True
-
 if __name__ == "__main__":
-    print("CodeBreak PostgreSQL Dependency Installer")
-    print("=========================================")
+    print("CodeBreak Dependency Installer")
+    print("=============================")
     
-    # First try installing dependencies
     if install_dependencies():
         print("\nSuccessfully installed all required packages.")
-        
-        # Set up database configuration
-        setup_database_connection()
-        
-        print("\nYou can now run 'python simple_run.py' to start the application.")
-        print("Make sure PostgreSQL is running and you've updated your credentials in the .env file.")
+        #print("\nYou can now run 'python unified_game_launcher.p' to start the game.")
     else:
         print("\nFailed to install some dependencies.")
         print("Please resolve the issues and try running this script again.")

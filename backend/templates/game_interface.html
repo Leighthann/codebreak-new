@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CodeBreak - Game Interface</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #0a0a19;
+            color: #fff;
+            margin: 0;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 3fr 1fr;
+            gap: 20px;
+        }
+        
+        .game-area {
+            background-color: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .sidebar {
+            background-color: rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .inventory {
+            margin-bottom: 20px;
+        }
+        
+        .resource-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            border-bottom: 1px solid #333;
+        }
+        
+        .share-form {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+        }
+        
+        .share-form select,
+        .share-form input {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            background-color: #1a1a2e;
+            border: 1px solid #333;
+            color: #fff;
+            border-radius: 4px;
+        }
+        
+        .share-button {
+            width: 100%;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        
+        .share-button:hover {
+            background-color: #45a049;
+        }
+        
+        .transfer-history {
+            margin-top: 20px;
+        }
+        
+        .transfer-item {
+            padding: 10px;
+            border-bottom: 1px solid #333;
+            font-size: 0.9em;
+        }
+        
+        .transfer-item .timestamp {
+            color: #888;
+            font-size: 0.8em;
+        }
+        
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px;
+            border-radius: 4px;
+            color: white;
+            display: none;
+        }
+        
+        .notification.success {
+            background-color: #4CAF50;
+        }
+        
+        .notification.error {
+            background-color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="game-area">
+            <!-- Game canvas will be inserted here by the game client -->
+            <canvas id="gameCanvas"></canvas>
+        </div>
+        
+        <div class="sidebar">
+            <div class="inventory">
+                <h3>Your Inventory</h3>
+                <div id="inventoryList">
+                    <!-- Inventory items will be populated here -->
+                </div>
+            </div>
+            
+            <div class="share-form">
+                <h3>Share Resources</h3>
+                <select id="playerSelect" aria-label="Select player to share with">
+                    <option value="">Select Player</option>
+                </select>
+                
+                <select id="resourceSelect" aria-label="Select resource to share">
+                    <option value="">Select Resource</option>
+                    <option value="code_fragments">Code Fragments</option>
+                    <option value="energy_cores">Energy Cores</option>
+                    <option value="data_shards">Data Shards</option>
+                </select>
+                
+                <input type="number" id="amountInput" min="1" placeholder="Amount">
+                
+                <button class="share-button" onclick="shareResource()">Share Resource</button>
+            </div>
+            
+            <div class="transfer-history">
+                <h3>Recent Transfers</h3>
+                <div id="transferList">
+                    <!-- Transfer history will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="notification" class="notification"></div>
+    
+    <script>
+        let ws;
+        let gameId;
+        let username;
+        let inventory = {};
+        
+        function initializeWebSocket() {
+            const token = localStorage.getItem('game_token');
+            gameId = localStorage.getItem('current_game_id');
+            username = localStorage.getItem('username');
+            
+            ws = new WebSocket(`ws://${window.location.host}/ws/${username}?token=${token}&game_id=${gameId}`);
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+                requestTransferHistory();
+                updatePlayerList();
+            };
+        }
+        
+        function handleWebSocketMessage(data) {
+            switch(data.event) {
+                case 'inventory_update':
+                    inventory = data.inventory;
+                    updateInventoryDisplay();
+                    break;
+                    
+                case 'resource_transfer':
+                    showNotification(`${data.from_username} shared ${data.amount} ${data.resource_type} with ${data.to_username}`, 'success');
+                    addTransferToHistory(data);
+                    break;
+                    
+                case 'resource_share_response':
+                    if (data.status === 'success') {
+                        showNotification(data.message, 'success');
+                    } else {
+                        showNotification(data.message, 'error');
+                    }
+                    break;
+                    
+                case 'transfer_history':
+                    updateTransferHistory(data.transfers);
+                    break;
+                    
+                case 'player_joined':
+                case 'player_left':
+                    updatePlayerList();
+                    break;
+            }
+        }
+        
+        function updateInventoryDisplay() {
+            const inventoryList = document.getElementById('inventoryList');
+            inventoryList.innerHTML = '';
+            
+            for (const [resource, amount] of Object.entries(inventory)) {
+                const item = document.createElement('div');
+                item.className = 'resource-item';
+                item.innerHTML = `
+                    <span>${resource.replace('_', ' ').toUpperCase()}</span>
+                    <span>${amount}</span>
+                `;
+                inventoryList.appendChild(item);
+            }
+        }
+        
+        function updatePlayerList() {
+            const playerSelect = document.getElementById('playerSelect');
+            
+            // Clear existing options except the first one
+            while (playerSelect.options.length > 1) {
+                playerSelect.remove(1);
+            }
+            
+            // Request current players in game
+            ws.send(JSON.stringify({
+                action: 'get_players',
+                game_id: gameId
+            }));
+        }
+        
+        function shareResource() {
+            const toUsername = document.getElementById('playerSelect').value;
+            const resourceType = document.getElementById('resourceSelect').value;
+            const amount = parseInt(document.getElementById('amountInput').value);
+            
+            if (!toUsername || !resourceType || !amount) {
+                showNotification('Please fill in all fields', 'error');
+                return;
+            }
+            
+            ws.send(JSON.stringify({
+                action: 'share_resource',
+                to_username: toUsername,
+                resource_type: resourceType,
+                amount: amount,
+                game_id: gameId
+            }));
+        }
+        
+        function requestTransferHistory() {
+            ws.send(JSON.stringify({
+                action: 'request_transfers',
+                game_id: gameId
+            }));
+        }
+        
+        function updateTransferHistory(transfers) {
+            const transferList = document.getElementById('transferList');
+            transferList.innerHTML = '';
+            
+            transfers.forEach(transfer => {
+                const item = document.createElement('div');
+                item.className = 'transfer-item';
+                item.innerHTML = `
+                    <div>${transfer.from_username} → ${transfer.to_username}</div>
+                    <div>${transfer.amount} ${transfer.resource_type}</div>
+                    <div class="timestamp">${new Date(transfer.transferred_at).toLocaleString()}</div>
+                `;
+                transferList.appendChild(item);
+            });
+        }
+        
+        function showNotification(message, type) {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+        
+        // Initialize WebSocket connection when page loads
+        window.onload = initializeWebSocket;
+    </script>
+</body>
+</html> 

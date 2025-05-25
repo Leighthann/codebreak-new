@@ -427,18 +427,110 @@ class Menu:
         pygame.quit()
         sys.exit()
 
+class ChatSystem:
+    def __init__(self, font, max_messages=5):
+        self.messages = []
+        self.max_messages = max_messages
+        self.font = font
+        self.input_active = False
+        self.current_message = ""
+        self.input_box = pygame.Rect(20, HEIGHT - 40, 400, 30)
+        self.chat_box = pygame.Rect(10, HEIGHT - (max_messages + 1) * 35, 420, (max_messages + 1) * 35)
+        self.cursor_visible = True
+        self.cursor_timer = 0
+        self.cursor_blink_speed = 30  # Frames per blink
+
+    def add_message(self, username, message, system_message=False):
+        timestamp = datetime.now().strftime("%H:%M")
+        color = NEON_GREEN if system_message else WHITE
+        formatted_message = f"[{timestamp}] {message}" if system_message else f"[{timestamp}] {username}: {message}"
+        self.messages.append({"text": formatted_message, "color": color, "timestamp": datetime.now()})
+        if len(self.messages) > self.max_messages:
+            self.messages.pop(0)
+
+    def handle_event(self, event, player):
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_t and not self.input_active:
+                self.input_active = True
+                return True
+            if self.input_active:
+                if event.key == pygame.K_RETURN:
+                    if self.current_message:
+                        if player and hasattr(player, 'ws'):
+                            chat_data = {"action": "chat_message", "message": self.current_message}
+                            asyncio.create_task(player.ws.send(json.dumps(chat_data)))
+                        self.add_message(player.username, self.current_message)
+                        self.current_message = ""
+                    self.input_active = False
+                    return True
+                elif event.key == pygame.K_ESCAPE:
+                    self.current_message = ""
+                    self.input_active = False
+                    return True
+                elif event.key == pygame.K_BACKSPACE:
+                    self.current_message = self.current_message[:-1]
+                    return True
+                else:
+                    self.current_message += event.unicode
+                    return True
+        return False
+
+    def update(self):
+        self.cursor_timer += 1
+        if self.cursor_timer >= self.cursor_blink_speed:
+            self.cursor_timer = 0
+            self.cursor_visible = not self.cursor_visible
+
+    def draw(self, surface):
+        if len(self.messages) > 0 or self.input_active:
+            chat_surface = pygame.Surface((self.chat_box.width, self.chat_box.height), pygame.SRCALPHA)
+            chat_surface.fill((0, 0, 0, 128))
+            surface.blit(chat_surface, self.chat_box)
+            
+            for i, message in enumerate(self.messages):
+                msg_surf = self.font.render(message["text"], True, message["color"])
+                y_pos = HEIGHT - (len(self.messages) - i + 1) * 30 - 40
+                surface.blit(msg_surf, (20, y_pos))
+            
+            if self.input_active:
+                input_surface = pygame.Surface((self.input_box.width, self.input_box.height), pygame.SRCALPHA)
+                input_surface.fill((50, 50, 50, 200))
+                surface.blit(input_surface, self.input_box)
+                
+                if self.current_message:
+                    input_text = self.font.render(self.current_message, True, WHITE)
+                    surface.blit(input_text, (self.input_box.x + 5, self.input_box.y + 5))
+                
+                if self.cursor_visible:
+                    text_width = self.font.size(self.current_message)[0]
+                    cursor_x = self.input_box.x + 5 + text_width
+                    pygame.draw.line(surface, WHITE,
+                                  (cursor_x, self.input_box.y + 5),
+                                  (cursor_x, self.input_box.y + self.input_box.height - 5), 2)
+                
+                prompt = self.font.render("Type your message and press Enter", True, (200, 200, 200))
+                surface.blit(prompt, (self.input_box.x + 5, self.input_box.y - 25))
+            elif len(self.messages) > 0:
+                hint = self.font.render("Press T to chat", True, (200, 200, 200))
+                hint_rect = hint.get_rect(bottomleft=(20, HEIGHT - 10))
+                surface.blit(hint, hint_rect)
+
 class Game:
     def __init__(self):
-        # Initialize pygame
+        # Initialize pygame and display first
         pygame.init()
         pygame.mixer.init()
+        pygame.display.init()  # Explicitly initialize display
+        
+        # Create resizable screen (must be done before loading any images)
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
+        pygame.display.set_caption("CodeBreak")
+        self.current_width = WIDTH
+        self.current_height = HEIGHT
+        pygame.display.flip()  # Initial display update
         
         # Load server configuration
         self.load_server_config()
-        
-        # Create screen
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("CodeBreak")
         
         # Initialize game state and event IDs
         self.game_over_event_id = pygame.USEREVENT + 1
@@ -448,9 +540,7 @@ class Game:
         self.current_wave = 1
         self.game_start_time = 0
         
-        # Create screen
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption("CodeBreak")
+        # Initialize clock
         self.clock = pygame.time.Clock()
         self.FPS = 60
         
@@ -459,6 +549,7 @@ class Game:
         self.previous_state = None
         self.transition_timer = 0
         self.transition_duration = 15
+        self.error_message = None  # Initialize error message attribute
         self.fading_in = False
         self.fading_out = False
         self.next_state = None
@@ -700,7 +791,7 @@ class Game:
         
         # Create game over buttons
         self.game_over_buttons = [
-            Button(button_x, 350, button_width, button_height, "PLAY AGAIN", lambda: self.restart_game()),
+            Button(button_x, 350, button_width, button_height, "PLAY AGAIN", lambda: asyncio.create_task(self.restart_game())),
             Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
             Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
         ]
@@ -743,14 +834,49 @@ class Game:
                     lambda val: self.update_setting("difficulty", val))
         )
 
-    async def handle_gameplay(self, events=None, dt=1/60):
+    def update_ui_positions(self):
+        """Update UI element positions based on current window dimensions."""
+        # Calculate scale factors
+        scale_x = self.current_width / WIDTH
+        scale_y = self.current_height / HEIGHT
+        
+        # Update button positions
+        button_width = int(200 * scale_x)
+        button_height = int(50 * scale_y)
+        button_x = self.current_width // 2 - button_width // 2
+        
+        # Update menu buttons
+        if hasattr(self, 'menu_buttons'):
+            positions = [250, 320, 390, 460]
+            for i, button in enumerate(self.menu_buttons):
+                button.rect.x = button_x
+                button.rect.y = int(positions[i] * scale_y)
+                button.rect.width = button_width
+                button.rect.height = button_height
+        
+        # Update game over buttons
+        if hasattr(self, 'game_over_buttons'):
+            positions = [350, 420, 490]
+            for i, button in enumerate(self.game_over_buttons):
+                button.rect.x = button_x
+                button.rect.y = int(positions[i] * scale_y)
+                button.rect.width = button_width
+                button.rect.height = button_height
+        
+        # Update pause buttons
+        if hasattr(self, 'pause_buttons'):
+            positions = [250, 320, 390, 460]
+            for i, button in enumerate(self.pause_buttons):
+                button.rect.x = button_x
+                button.rect.y = int(positions[i] * scale_y)
+                button.rect.width = button_width
+                button.rect.height = button_height
+
+    async def handle_gameplay_state(self, events=None, dt=1/60):
         """Handle gameplay state."""
+        # Initialize game world if needed
         if not self.player:
-            # If player is gone, we must be in process of transitioning to game over
-            # Just draw any visual effects that might be active
-            self.update_visual_effects(dt)
-            self.draw_gameplay_elements()
-            self.draw_gameplay_ui()
+            await self.initialize_game_world()
             return
         
         keys = pygame.key.get_pressed()
@@ -767,9 +893,20 @@ class Game:
                 return
             elif self.chat_system.handle_event(event, self.player):
                     continue  # Skip other event processing if chat handled it
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                # Handle resource sharing button clicks
+                self.handle_resource_sharing_ui()
+                
             elif event.type == pygame.KEYDOWN:
+                # Quick share shortcuts (1-3 keys)
+                if not self.show_crafting and event.key in [pygame.K_1, pygame.K_2, pygame.K_3]:
+                    resource_types = ["code_fragments", "energy_cores", "data_shards"]
+                    resource_index = event.key - pygame.K_1  # Convert key to 0-based index
+                    if resource_index < len(resource_types):
+                        self.handle_resource_sharing_ui(resource_types[resource_index])
+                
                 # Crafting menu toggle
-                if event.key == pygame.K_c:
+                elif event.key == pygame.K_c:
                     self.show_crafting = not self.show_crafting
                     self.play_sound("menu_select")
                     print(f"Crafting menu {'opened' if self.show_crafting else 'closed'}")  # Debug print
@@ -1234,7 +1371,7 @@ class Game:
                 "action": "share_resource",
                 "resource_type": resource_type,
                 "amount": share_amount,
-                "shared_by": self.username if hasattr(self, 'username') else "unknown",
+                "to_username": "all",  # Share with all teammates
                 "game_id": self.game_id  # Include game ID for sharing within a specific game
             }
             
@@ -1245,14 +1382,44 @@ class Game:
             self.add_effect(
                     "text", self.player.x if self.player else 0, (self.player.y - 40) if self.player else 0,
                     text=f"Shared {share_amount} {resource_type.replace('_', ' ')}!",
-                    color=(0, 255, 100),  # NEON_GREEN
+                    color=NEON_GREEN,
                     size=16,
                     duration=1.5
                 )
+            
+            # Play sound effect
+            self.play_sound("collect")
+            
+            # Add visual effects
+            self.start_screen_shake(2, 0.2)  # Subtle screen shake
+            
+            # Spawn particle effects
+            for _ in range(3):
+                angle = random.uniform(0, 2 * math.pi)
+                speed = random.uniform(2, 5)
+                self.add_effect(
+                    "particle",
+                    self.player.x if self.player else 0,
+                    self.player.y if self.player else 0,
+                    color=NEON_GREEN,
+                    size=4,
+                    duration=0.5,
+                    velocity=(math.cos(angle) * speed, math.sin(angle) * speed)
+                )
+            
             print(f"Shared {share_amount} {resource_type} with team")
             
         except Exception as e:
             print(f"Error sharing resource: {e}")
+            self.add_effect(
+                "text",
+                self.player.x if self.player else 0,
+                (self.player.y - 40) if self.player else 0,
+                text="Failed to share resource!",
+                color=RED,
+                size=16,
+                duration=1.5
+            )
 
     def spawn_resource_at(self, x, y, resource_type=None, amount=None, is_shared=False):
         """Spawn a resource at the given location."""
@@ -1419,20 +1586,16 @@ class Game:
                         y=resource["y"],
                         value=resource["value"]
                     )
-
-                     # Share with teammates (only if not already a shared resource)
-                    if not resource.get("shared", False):
-                        self.share_resource_with_teammates(resource["type"], resource["value"])
                     
                     # Play sound
                     self.play_sound("collect")
                     
-                    # Add effect
+                    # Add collection effect
                     self.add_effect("text", resource["x"], resource["y"] - 20, 
-                                    text=f"+{resource['value']}", 
-                                    color=WHITE, 
-                                    size=16, 
-                                    duration=1.0)
+                                  text=f"Collected {resource['value']} {resource['type'].replace('_', ' ')}!", 
+                                  color=WHITE, 
+                                  size=16, 
+                                  duration=1.0)
                     self.resources.remove(resource)
             
                     # # Add score for collection
@@ -1659,20 +1822,28 @@ class Game:
                 text_rect = text.get_rect(center=(effect["x"], effect["y"]))
                 world_surface.blit(text, text_rect)
         
-        # Apply camera shake
+        # Apply camera shake and draw world surface
         self.screen.blit(world_surface, (self.camera_offset_x, self.camera_offset_y))
         
         # Draw UI elements on top of the world
         self.draw_gameplay_ui()
 
         # Draw chat system on top of everything
-        self.chat_system.draw(self.screen)
+        if hasattr(self, 'chat_system'):
+            self.chat_system.draw(self.screen)
+            
+        # Update display
+        pygame.display.flip()
 
     def draw_gameplay_ui(self):
         """Draw the gameplay UI elements."""
         if not self.player:
             return
-        
+            
+        # Initialize share buttons dictionary if not exists
+        if not hasattr(self, 'share_buttons'):
+            self.share_buttons = {}
+            
         # Draw health bar
         health_width = 200
         health_height = 20
@@ -1765,15 +1936,45 @@ class Game:
         self.screen.blit(inventory_title, 
                        (inventory_x + 10, inventory_y + 5))
         
-        # Draw inventory contents
+        # Draw inventory contents with share buttons
         y_offset = inventory_y + 30
         for resource, amount in self.player.inventory.items():
+            # Resource name and amount
             resource_text = self.font_sm.render(
                 f"{resource.replace('_', ' ').title()}: {amount}", 
                 True, WHITE
             )
             self.screen.blit(resource_text, (inventory_x + 20, y_offset))
-            y_offset += 20
+            
+            # Share button
+            if amount > 0:  # Only show share button if we have resources
+                share_btn_width = 50
+                share_btn_x = inventory_x + inventory_width - share_btn_width - 10
+                share_btn_rect = pygame.Rect(share_btn_x, y_offset, share_btn_width, 15)
+                
+                # Check if mouse is over share button
+                mouse_pos = pygame.mouse.get_pos()
+                is_hovered = share_btn_rect.collidepoint(mouse_pos)
+                
+                # Draw share button
+                pygame.draw.rect(self.screen, 
+                               NEON_GREEN if is_hovered else CYAN, 
+                               share_btn_rect)
+                
+                # Share button text
+                share_text = self.font_sm.render("Share", True, BLACK)
+                share_text_rect = share_text.get_rect(center=share_btn_rect.center)
+                self.screen.blit(share_text, share_text_rect)
+                
+                # Store button info for click handling
+                self.share_buttons[resource] = share_btn_rect
+            
+            y_offset += 25
+            
+        # Draw sharing shortcuts help
+        shortcuts_y = y_offset + 10
+        shortcuts_text = self.font_sm.render("Shortcuts: 1-3 to quick share", True, GRAY)
+        self.screen.blit(shortcuts_text, (inventory_x + 20, shortcuts_y))
             
         # Draw equipped tool info
         if self.player.equipped_tool:
@@ -2357,6 +2558,15 @@ class Game:
 
     async def handle_state(self, events, dt):
         """Handle the current game state."""
+        # Handle window resize events first
+        for event in events:
+            if event.type == pygame.VIDEORESIZE:
+                self.current_width = event.w
+                self.current_height = event.h
+                self.screen = pygame.display.set_mode((event.w, event.h), pygame.RESIZABLE)
+                # Update UI positions based on new dimensions
+                self.update_ui_positions()
+                
         # Check if player has been defeated but state hasn't changed
         if hasattr(self, 'game_over_triggered') and self.game_over_triggered and self.current_state != "game_over":
             # Force transition to game over if it's been triggered but not applied
@@ -2365,14 +2575,14 @@ class Game:
         
         # Handle state transitions
         if self.fading_out or self.fading_in:
-            self.handle_transition()
+            await self.handle_transition()
             return
             
         # Handle current state
         if self.current_state == "menu":
             self.handle_menu(events, dt)
         elif self.current_state == "gameplay":
-            await self.handle_gameplay(events, dt)
+            await self.handle_gameplay_state(events, dt)
         elif self.current_state == "pause":
             self.handle_pause(events, dt)
         elif self.current_state == "settings":
@@ -2383,22 +2593,28 @@ class Game:
             self.handle_leaderboard(events, dt)
 
     def handle_menu(self, events, dt):
-        """Handle the menu state."""
-        # Draw menu background
+        """Handle menu state."""
+        # Draw background
         self.draw_menu_background(dt)
         
-        # Draw game title
+        # Draw game title with scaling
         title_text = self.font_xl.render("CODEBREAK", True, NEON_BLUE)
         title_shadow = self.font_xl.render("CODEBREAK", True, NEON_PINK)
-        shadow_pos = (WIDTH // 2 - title_shadow.get_width() // 2 + 3, 
-                     100 + 3)
-        title_pos = (WIDTH // 2 - title_text.get_width() // 2, 100)
+        
+        # Scale positions based on current window size
+        title_x = self.current_width // 2
+        title_y = int(100 * (self.current_height / HEIGHT))
+        
+        shadow_pos = (title_x - title_shadow.get_width() // 2 + 3, title_y + 3)
+        title_pos = (title_x - title_text.get_width() // 2, title_y)
+        
         self.screen.blit(title_shadow, shadow_pos)
         self.screen.blit(title_text, title_pos)
         
         # Draw subtitle
         subtitle = self.font_md.render("CYBER SURVIVAL", True, WHITE)
-        subtitle_pos = (WIDTH // 2 - subtitle.get_width() // 2, 160)
+        subtitle_y = int(160 * (self.current_height / HEIGHT))
+        subtitle_pos = (self.current_width // 2 - subtitle.get_width() // 2, subtitle_y)
         self.screen.blit(subtitle, subtitle_pos)
         
         # Update and draw buttons
@@ -2407,17 +2623,44 @@ class Game:
             button.update(mouse_pos)
             button.draw(self.screen, self.font_md)
         
-        # Handle button events
-        for event in events:
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                for button in self.menu_buttons:
-                    if button.handle_event(event):
-                        break
+        # Draw error message if any
+        self.draw_error_message()
         
         # Draw version info
-        version_text = self.font_sm.render("v0.1", True, GRAY)
-        self.screen.blit(version_text, (WIDTH - version_text.get_width() - 10, 
-                                      HEIGHT - version_text.get_height() - 10))
+        version_text = self.font_sm.render("v1.0", True, GRAY)
+        version_x = self.current_width - version_text.get_width() - 10
+        version_y = self.current_height - version_text.get_height() - 10
+        self.screen.blit(version_text, (version_x, version_y))
+        
+        # Handle events
+        for event in events:
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            for button in self.menu_buttons:
+                if button.handle_event(event):
+                    self.play_sound("menu_select")
+                    return
+
+    def draw_error_message(self):
+        """Draw error message with improved visibility."""
+        if hasattr(self, 'error_message') and self.error_message:
+            # Create error background
+            error_bg = pygame.Surface((self.current_width * 0.8, 100))
+            error_bg.fill((40, 0, 0))
+            error_bg.set_alpha(200)
+            error_bg_rect = error_bg.get_rect(center=(self.current_width // 2, self.current_height // 2))
+            self.screen.blit(error_bg, error_bg_rect)
+            
+            # Draw error message with shadow for better visibility
+            error_text = self.font_lg.render(self.error_message, True, RED)
+            error_shadow = self.font_lg.render(self.error_message, True, (40, 0, 0))
+            error_rect = error_text.get_rect(center=(self.current_width // 2, self.current_height // 2))
+            shadow_rect = error_rect.copy()
+            shadow_rect.x += 2
+            shadow_rect.y += 2
+            self.screen.blit(error_shadow, shadow_rect)
+            self.screen.blit(error_text, error_rect)
 
     def handle_pause(self, events, dt):
         """Handle the pause state."""
@@ -2475,6 +2718,9 @@ class Game:
         # Implement if needed
 
     def draw_menu_background(self, dt):
+        # Scale background elements based on current window size
+        scale_x = self.current_width / WIDTH
+        scale_y = self.current_height / HEIGHT
         """Draw animated cyberpunk background for menus."""
         # Fill background
         self.screen.fill(BG_COLOR)
@@ -2532,7 +2778,7 @@ class Game:
                               (int(particle["x"]), int(particle["y"])), 
                               particle["size"])
 
-    def handle_transition(self):
+    async def handle_transition(self):
         """Handle state transitions with fade effect."""
         if self.fading_out:
             # Increment transition timer
@@ -2555,7 +2801,7 @@ class Game:
                 
                 # Initialize new state if needed
                 if self.current_state == "gameplay" and not self.player:
-                    asyncio.create_task(self.initialize_game_world())
+                    await self.initialize_game_world()
                 
         elif self.fading_in:
             # Increment transition timer
@@ -3187,10 +3433,12 @@ class Game:
             button_height = 50
             button_x = WIDTH // 2 - button_width // 2
             self.game_over_buttons = [
-                Button(button_x, 350, button_width, button_height, "PLAY AGAIN", self.restart_game),
+                Button(button_x, 350, button_width, button_height, "PLAY AGAIN", lambda: asyncio.create_task(self.restart_game())),
                 Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
                 Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
             ]
+            # Store the game over state as previous state for proper back button functionality
+            self.previous_state = "game_over"
         
         # Draw instructions to ensure players know how to proceed
         instruction_text = self.font_sm.render("Click a button or press ESC to return to menu", True, WHITE)
@@ -3412,26 +3660,29 @@ class Game:
         # Update and draw leaderboard entries
         self.draw_leaderboard_entries()
         
+        # Determine the return state based on where we came from
+        return_state = self.previous_state if self.previous_state in ["menu", "game_over"] else "menu"
+        
         # Create and draw back button
-        back_button = Button(WIDTH // 2 - 75, HEIGHT - 80, 150, 40, "BACK", lambda: self.transition_to("menu"))
+        back_button = Button(WIDTH // 2 - 75, HEIGHT - 80, 150, 40, "BACK", lambda: self.transition_to(return_state))
         mouse_pos = pygame.mouse.get_pos()
         back_button.update(mouse_pos)
         back_button.draw(self.screen, self.font_md)
         
         # Draw instructions
-        instructions = self.font_sm.render("Press ESC to return to menu", True, (200, 200, 255))
+        instructions = self.font_sm.render("Press ESC to return", True, (200, 200, 255))
         self.screen.blit(instructions, (WIDTH // 2 - instructions.get_width() // 2, HEIGHT - 30))
         
         # Handle events
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
-                    self.transition_to("menu")
+                    self.transition_to(return_state)
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Handle back button click
                 if back_button.handle_event(event):
                     self.play_sound("menu_select")
-                    self.transition_to("menu")
+                    self.transition_to(return_state)
 
     def draw_leaderboard_background(self,dt):
         """Draw animated cyberpunk background for leaderboard."""
@@ -3645,6 +3896,8 @@ class Game:
 
     
             
+
+
     def handle_shared_resource(self, data):
         """Process shared resource from another player."""
         try:
@@ -3903,149 +4156,161 @@ class Game:
         if hasattr(self, 'current_wave'):
             self.current_wave = state.get("wave", 1)
 
-class ChatSystem:
-    def __init__(self, font, max_messages=5):
-        self.messages = []
-        self.max_messages = max_messages
-        self.font = font
-        self.input_active = False
-        self.current_message = ""
-        self.input_box = pygame.Rect(20, HEIGHT - 40, 400, 30)
-        self.chat_box = pygame.Rect(10, HEIGHT - (max_messages + 1) * 35, 420, (max_messages + 1) * 35)
-        self.cursor_visible = True
-        self.cursor_timer = 0
-        self.cursor_blink_speed = 30  # Frames per blink
-    
-    def add_message(self, username, message, system_message=False):
-        """Add a new message to the chat"""
-        timestamp = datetime.now().strftime("%H:%M")
-        color = (200, 200, 200)  # Default color
-        
-        if system_message:
-            # System messages in yellow
-            formatted_message = f"[{timestamp}] {message}"
-            color = (255, 255, 0)
-        else:
-            # Player messages include username
-            formatted_message = f"[{timestamp}] {username}: {message}"
+    def handle_resource_sharing(self, resource_type=None):
+        """Handle resource sharing with teammates."""
+        if not self.player or not hasattr(self.player, "inventory"):
+            return
             
-            # Different colors for different users
-            if username == "Player1":  # Current player
-                color = (0, 255, 255)  # Cyan
-            else:
-                # Generate a color based on username
-                username_hash = hash(username) % 1000
-                r = (username_hash % 155) + 100  # 100-255
-                g = ((username_hash // 10) % 155) + 100  # 100-255
-                b = ((username_hash // 100) % 155) + 100  # 100-255
-                color = (r, g, b)
+        # If no resource type specified, check if any share button was clicked
+        if resource_type is None:
+            mouse_pos = pygame.mouse.get_pos()
+            for res_type, btn_rect in getattr(self, 'share_buttons', {}).items():
+                if btn_rect.collidepoint(mouse_pos):
+                    resource_type = res_type
+                    break
         
-        self.messages.append({
-            "text": formatted_message,
-            "color": color,
-            "timestamp": datetime.now()
-        })
-        
-        # Limit the number of messages
-        if len(self.messages) > self.max_messages:
-            self.messages.pop(0)
-    
-    def handle_event(self, event, player):
-        """Handle chat input events"""
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_t and not self.input_active:
-                # Open chat on T key
-                self.input_active = True
-                return True
-            
-            if self.input_active:
-                if event.key == pygame.K_RETURN:
-                    # Send message on Enter key
-                    if self.current_message:
-                        # Send message via WebSocket
-                        if player and player.ws:
-                            chat_data = {
-                                "action": "chat_message",
-                                "message": self.current_message
-                            }
-                            asyncio.create_task(player.ws.send(json.dumps(chat_data)))
-                        
-                        # Add to local chat
-                        self.add_message(player.username, self.current_message)
-                        
-                        # Reset input
-                        self.current_message = ""
-                    
-                    # Close input
-                    self.input_active = False
-                    return True
+        if resource_type and resource_type in self.player.inventory:
+            current_amount = self.player.inventory[resource_type]
+            if current_amount > 0:
+                # Share half of the current amount (minimum 1)
+                share_amount = max(1, current_amount // 2)
                 
-                elif event.key == pygame.K_ESCAPE:
-                    # Cancel input on Escape
-                    self.current_message = ""
-                    self.input_active = False
-                    return True
+                # Update local inventory immediately
+                self.player.inventory[resource_type] -= share_amount
                 
-                elif event.key == pygame.K_BACKSPACE:
-                    # Delete character on Backspace
-                    self.current_message = self.current_message[:-1]
-                    return True
+                # Share with teammates
+                self.share_resource_with_teammates(resource_type, share_amount)
                 
-                else:
-                    # Add character to message
-                    self.current_message += event.unicode
-                    return True
-        
-        return False
+                # Visual and audio feedback
+                self.add_effect(
+                    "text",
+                    self.player.x,
+                    self.player.y - 40,
+                    text=f"Shared {share_amount} {resource_type.replace('_', ' ')}!",
+                    color=NEON_GREEN,
+                    size=16,
+                    duration=1.5
+                )
+                self.play_sound("share")  # Add a share sound effect
+                self.start_screen_shake(2, 0.2)  # Subtle screen shake
+                
+                # Spawn visual effect
+                for _ in range(3):  # Spawn 3 particle effects
+                    angle = random.uniform(0, 2 * math.pi)
+                    speed = random.uniform(2, 5)
+                    self.add_effect(
+                        "particle",
+                        self.player.x,
+                        self.player.y,
+                        color=NEON_GREEN,
+                        size=4,
+                        duration=0.5,
+                        velocity=(math.cos(angle) * speed, math.sin(angle) * speed)
+                    )
+
+
+
+
     
     def update(self):
         """Update chat system state"""
         # Update cursor blinking
-        self.cursor_timer += 1
-        if self.cursor_timer >= self.cursor_blink_speed:
-            self.cursor_timer = 0
-            self.cursor_visible = not self.cursor_visible
+        self.chat_system.cursor_timer += 1
+        if self.chat_system.cursor_timer >= self.chat_system.cursor_blink_speed:
+            self.chat_system.cursor_timer = 0
+            self.chat_system.cursor_visible = not self.chat_system.cursor_visible
     
     def draw(self, surface):
         """Draw the chat system"""
         # Only draw chat box if there are messages or input is active
-        if len(self.messages) > 0 or self.input_active:
+        if len(self.chat_system.messages) > 0 or self.chat_system.input_active:
             # Draw semi-transparent chat background
-            chat_surface = pygame.Surface((self.chat_box.width, self.chat_box.height), pygame.SRCALPHA)
+            chat_surface = pygame.Surface((self.chat_system.chat_box.width, self.chat_system.chat_box.height), pygame.SRCALPHA)
             chat_surface.fill((0, 0, 0, 128))  # Semi-transparent black
-            surface.blit(chat_surface, self.chat_box)
+            surface.blit(chat_surface, self.chat_system.chat_box)
             
             # Draw messages (most recent at the bottom)
-            for i, message in enumerate(self.messages):
-                msg_surf = self.font.render(message["text"], True, message["color"])
-                y_pos = HEIGHT - (len(self.messages) - i + 1) * 30 - 40
+            for i, message in enumerate(self.chat_system.messages):
+                msg_surf = self.chat_system.font.render(message["text"], True, message["color"])
+                y_pos = HEIGHT - (len(self.chat_system.messages) - i + 1) * 30 - 40
                 surface.blit(msg_surf, (20, y_pos))
             
             # Draw input box if active
-            if self.input_active:
-                input_surface = pygame.Surface((self.input_box.width, self.input_box.height), pygame.SRCALPHA)
+            if self.chat_system.input_active:
+                input_surface = pygame.Surface((self.chat_system.input_box.width, self.chat_system.input_box.height), pygame.SRCALPHA)
                 input_surface.fill((50, 50, 50, 200))
-                surface.blit(input_surface, self.input_box)
+                surface.blit(input_surface, self.chat_system.input_box)
                 
                 # Draw input text
-                if self.current_message:
-                    input_text = self.font.render(self.current_message, True, (255, 255, 255))
-                    surface.blit(input_text, (self.input_box.x + 5, self.input_box.y + 5))
+                if self.chat_system.current_message:
+                    input_text = self.chat_system.font.render(self.chat_system.current_message, True, (255, 255, 255))
+                    surface.blit(input_text, (self.chat_system.input_box.x + 5, self.chat_system.input_box.y + 5))
                 
                 # Draw cursor
-                if self.cursor_visible:
-                    text_width = self.font.size(self.current_message)[0]
-                    cursor_x = self.input_box.x + 5 + text_width
+                if self.chat_system.cursor_visible:
+                    text_width = self.chat_system.font.size(self.chat_system.current_message)[0]
+                    cursor_x = self.chat_system.input_box.x + 5 + text_width
                     pygame.draw.line(surface, (255, 255, 255),
-                                  (cursor_x, self.input_box.y + 5),
-                                  (cursor_x, self.input_box.y + self.input_box.height - 5), 2)
+                                  (cursor_x, self.chat_system.input_box.y + 5),
+                                  (cursor_x, self.chat_system.input_box.y + self.chat_system.input_box.height - 5), 2)
                 
                 # Draw prompt
-                prompt = self.font.render("Type your message and press Enter", True, (200, 200, 200))
-                surface.blit(prompt, (self.input_box.x + 5, self.input_box.y - 25))
-            elif len(self.messages) > 0:
+                prompt = self.chat_system.font.render("Type your message and press Enter", True, (200, 200, 200))
+                surface.blit(prompt, (self.chat_system.input_box.x + 5, self.chat_system.input_box.y - 25))
+            elif len(self.chat_system.messages) > 0:
                 # Show hint when chat has messages but input is inactive
-                hint = self.font.render("Press T to chat", True, (200, 200, 200))
+                hint = self.chat_system.font.render("Press T to chat", True, (200, 200, 200))
                 hint_rect = hint.get_rect(bottomleft=(20, HEIGHT - 10))
                 surface.blit(hint, hint_rect)
 
+    def handle_resource_sharing_ui(self, resource_type=None):
+        """Handle resource sharing UI interactions."""
+        if not self.player or not hasattr(self.player, "inventory"):
+            return
+            
+        # If no resource type specified, check if any share button was clicked
+        if resource_type is None:
+            mouse_pos = pygame.mouse.get_pos()
+            for res_type, btn_rect in getattr(self, 'share_buttons', {}).items():
+                if btn_rect.collidepoint(mouse_pos):
+                    resource_type = res_type
+                    break
+        
+        if resource_type and resource_type in self.player.inventory:
+            current_amount = self.player.inventory[resource_type]
+            if current_amount > 0:
+                # Share half of the current amount (minimum 1)
+                share_amount = max(1, current_amount // 2)
+                
+                # Update local inventory immediately
+                self.player.inventory[resource_type] -= share_amount
+                
+                # Share with teammates
+                self.share_resource_with_teammates(resource_type, share_amount)
+                
+                # Visual and audio feedback
+                self.add_effect(
+                    "text",
+                    self.player.x,
+                    self.player.y - 40,
+                    text=f"Shared {share_amount} {resource_type.replace('_', ' ')}!",
+                    color=NEON_GREEN,
+                    size=16,
+                    duration=1.5
+                )
+                self.play_sound("collect")
+                self.start_screen_shake(2, 0.2)  # Subtle screen shake
+                
+                # Spawn visual effect
+                for _ in range(3):  # Spawn 3 particle effects
+                    angle = random.uniform(0, 2 * math.pi)
+                    speed = random.uniform(2, 5)
+                    self.add_effect(
+                        "particle",
+                        self.player.x,
+                        self.player.y,
+                        color=NEON_GREEN,
+                        size=4,
+                        duration=0.5,
+                        velocity=(math.cos(angle) * speed, math.sin(angle) * speed)
+                    )

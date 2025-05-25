@@ -54,6 +54,26 @@ def get_db_connection():
         try:
             connection = psycopg2.connect(**DB_PARAMS)
             print("Connection successful with env parameters!")
+            
+            # Initialize resource_transfers table if it doesn't exist
+            cursor = connection.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS resource_transfers (
+                    id SERIAL PRIMARY KEY,
+                    game_id VARCHAR(255) NOT NULL,
+                    from_username VARCHAR(255) NOT NULL,
+                    to_username VARCHAR(255) NOT NULL,
+                    resource_type VARCHAR(50) NOT NULL,
+                    amount INTEGER NOT NULL,
+                    transferred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (from_username) REFERENCES players(username),
+                    FOREIGN KEY (to_username) REFERENCES players(username),
+                    FOREIGN KEY (game_id) REFERENCES active_games(game_id) ON DELETE CASCADE
+                )
+            """)
+            connection.commit()
+            cursor.close()
+            
             return connection
         except Exception as e:
             print(f"First connection attempt failed: {e}")
@@ -66,6 +86,26 @@ def get_db_connection():
             print("Trying with hardcoded password as fallback...")
             connection = psycopg2.connect(**hardcoded_params)
             print("Connection successful with hardcoded password!")
+            
+            # Initialize resource_transfers table if it doesn't exist
+            cursor = connection.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS resource_transfers (
+                    id SERIAL PRIMARY KEY,
+                    game_id VARCHAR(255) NOT NULL,
+                    from_username VARCHAR(255) NOT NULL,
+                    to_username VARCHAR(255) NOT NULL,
+                    resource_type VARCHAR(50) NOT NULL,
+                    amount INTEGER NOT NULL,
+                    transferred_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (from_username) REFERENCES players(username),
+                    FOREIGN KEY (to_username) REFERENCES players(username),
+                    FOREIGN KEY (game_id) REFERENCES active_games(game_id) ON DELETE CASCADE
+                )
+            """)
+            connection.commit()
+            cursor.close()
+            
             return connection
             
     except Exception as e:
@@ -158,6 +198,17 @@ class PlayerModel(BaseModel):
     y: int = 0
     score: int = 0
     inventory: Optional[Dict] = None
+
+# Resource sharing models
+class ResourceTransfer(BaseModel):
+    to_username: str
+    resource_type: str
+    amount: int
+
+class ResourceTransferResponse(BaseModel):
+    status: str
+    message: str
+    transfer_id: Optional[int] = None
 
 # WebSocket Connection Manager
 class ConnectionManager:
@@ -651,23 +702,71 @@ async def websocket_endpoint(websocket: WebSocket, username: str, token: Optiona
                             await manager.broadcast(chat_data)
                 
                 elif action == "share_resource":
-                    # Handle resource sharing within a game
-                    if "resource_type" in data and "amount" in data:
-                        resource_type = data["resource_type"]
-                        amount = data["amount"]
-                        current_game_id = data.get("game_id")
-                        
-                        share_data = {
-                            "event": "share_resource",
-                            "resource_type": resource_type,
-                            "amount": amount,
-                            "shared_by": username
-                        }
-                        
-                        if current_game_id:
-                            await manager.broadcast_to_game(current_game_id, share_data, exclude=username)
-                        else:
-                            await manager.broadcast(share_data, exclude=username)
+                    if all(k in data for k in ["to_username", "resource_type", "amount", "game_id"]):
+                        try:
+                            # Create a ResourceTransfer object
+                            transfer = ResourceTransfer(
+                                to_username=data["to_username"],
+                                resource_type=data["resource_type"],
+                                amount=data["amount"]
+                            )
+                            
+                            # Call the share_resource endpoint
+                            response = await share_resource(
+                                game_id=data["game_id"],
+                                transfer=transfer,
+                                current_user={"username": username}
+                            )
+                            
+                            # Send success response back to sender
+                            await websocket.send_json({
+                                "event": "resource_share_response",
+                                "status": "success",
+                                "message": "Resource shared successfully",
+                                "transfer_id": response.transfer_id
+                            })
+                            
+                        except HTTPException as e:
+                            # Send error response back to sender
+                            await websocket.send_json({
+                                "event": "resource_share_response",
+                                "status": "error",
+                                "message": str(e.detail)
+                            })
+                        except Exception as e:
+                            # Send generic error response
+                            await websocket.send_json({
+                                "event": "resource_share_response",
+                                "status": "error",
+                                "message": "Failed to share resource"
+                            })
+                    else:
+                        await websocket.send_json({
+                            "event": "resource_share_response",
+                            "status": "error",
+                            "message": "Missing required fields for resource sharing"
+                        })
+                
+                elif action == "request_transfers":
+                    if "game_id" in data:
+                        try:
+                            # Get transfer history
+                            transfers = await get_transfers(
+                                game_id=data["game_id"],
+                                current_user={"username": username}
+                            )
+                            
+                            # Send transfer history to requester
+                            await websocket.send_json({
+                                "event": "transfer_history",
+                                "transfers": transfers["transfers"]
+                            })
+                        except Exception as e:
+                            await websocket.send_json({
+                                "event": "transfer_history",
+                                "status": "error",
+                                "message": str(e)
+                            })
                 
                 elif action == "leave_game":
                     # Handle a player leaving a game
@@ -1173,6 +1272,170 @@ async def admin_delete_game(game_id: str, current_user = Depends(is_admin_user))
             status_code=500,
             detail=f"Failed to delete game: {str(e)}"
         )
+
+# Resource sharing endpoints
+@app.post("/game/{game_id}/share-resource")
+async def share_resource(
+    game_id: str,
+    transfer: ResourceTransfer,
+    current_user = Depends(get_current_user)
+):
+    """Handle resource sharing between players in the same game"""
+    try:
+        from_username = current_user["username"]
+        
+        # Validate users are in the same game
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Check if both users are in the game
+        cursor.execute("""
+            SELECT username FROM game_players 
+            WHERE game_id = %s AND username IN (%s, %s)
+        """, (game_id, from_username, transfer.to_username))
+        players = [row["username"] for row in cursor.fetchall()]
+        
+        if len(players) != 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Both players must be in the same game"
+            )
+            
+        # Validate resource amount
+        cursor.execute("""
+            SELECT inventory FROM players WHERE username = %s
+        """, (from_username,))
+        player_inventory = cursor.fetchone()["inventory"]
+        
+        if not player_inventory or transfer.resource_type not in player_inventory:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Resource {transfer.resource_type} not found in inventory"
+            )
+            
+        current_amount = player_inventory[transfer.resource_type]
+        if current_amount < transfer.amount:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient {transfer.resource_type} (have: {current_amount}, need: {transfer.amount})"
+            )
+            
+        # Update sender's inventory
+        player_inventory[transfer.resource_type] -= transfer.amount
+        cursor.execute("""
+            UPDATE players 
+            SET inventory = %s 
+            WHERE username = %s
+        """, (json.dumps(player_inventory), from_username))
+        
+        # Update receiver's inventory
+        cursor.execute("""
+            SELECT inventory FROM players WHERE username = %s
+        """, (transfer.to_username,))
+        receiver_inventory = cursor.fetchone()["inventory"]
+        
+        if transfer.resource_type not in receiver_inventory:
+            receiver_inventory[transfer.resource_type] = 0
+        receiver_inventory[transfer.resource_type] += transfer.amount
+        
+        cursor.execute("""
+            UPDATE players 
+            SET inventory = %s 
+            WHERE username = %s
+        """, (json.dumps(receiver_inventory), transfer.to_username))
+        
+        # Record the transfer
+        cursor.execute("""
+            INSERT INTO resource_transfers 
+            (game_id, from_username, to_username, resource_type, amount)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (game_id, from_username, transfer.to_username, 
+              transfer.resource_type, transfer.amount))
+        
+        transfer_id = cursor.fetchone()["id"]
+        conn.commit()
+        
+        # Notify players through WebSocket
+        transfer_data = {
+            "event": "resource_transfer",
+            "transfer_id": transfer_id,
+            "from_username": from_username,
+            "to_username": transfer.to_username,
+            "resource_type": transfer.resource_type,
+            "amount": transfer.amount
+        }
+        
+        await manager.broadcast_to_game(game_id, transfer_data)
+        
+        return ResourceTransferResponse(
+            status="success",
+            message="Resource transfer successful",
+            transfer_id=transfer_id
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Resource transfer error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to transfer resource: {str(e)}"
+        )
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.get("/game/{game_id}/transfers")
+async def get_transfers(
+    game_id: str,
+    current_user = Depends(get_current_user)
+):
+    """Get resource transfer history for a game"""
+    try:
+        username = current_user["username"]
+        
+        conn = get_db_connection()
+        cursor = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        
+        # Verify user is in the game
+        cursor.execute("""
+            SELECT 1 FROM game_players 
+            WHERE game_id = %s AND username = %s
+        """, (game_id, username))
+        
+        if not cursor.fetchone():
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to view transfers for this game"
+            )
+            
+        # Get transfer history
+        cursor.execute("""
+            SELECT * FROM resource_transfers 
+            WHERE game_id = %s 
+            ORDER BY transferred_at DESC
+        """, (game_id,))
+        
+        transfers = []
+        for row in cursor.fetchall():
+            transfer = dict(row)
+            transfer["transferred_at"] = transfer["transferred_at"].isoformat()
+            transfers.append(transfer)
+            
+        return {"transfers": transfers}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching transfers: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch transfers: {str(e)}"
+        )
+    finally:
+        cursor.close()
+        conn.close()
 
 if __name__ == "__main__":
     import uvicorn

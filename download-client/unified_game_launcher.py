@@ -10,6 +10,41 @@ import time
 import pyperclip
 from pathlib import Path
 
+def check_dependencies():
+    """Check if all required dependencies are installed"""
+    required_packages = ["pygame", "websockets", "requests", "python-dotenv", "pyperclip"]
+    missing_packages = []
+    
+    for package in required_packages:
+        try:
+            __import__(package)
+        except ImportError:
+            missing_packages.append(package)
+    
+    if missing_packages:
+        print("Missing required packages:", ", ".join(missing_packages))
+        print("Running dependency installer...")
+        
+        # Run install_dependencies.py
+        try:
+            result = subprocess.run([sys.executable, "install_dependencies.py"], check=True)
+            if result.returncode == 0:
+                print("Dependencies installed successfully!")
+                # Re-import pygame since we need it for the launcher
+                import pygame
+            else:
+                print("Failed to install dependencies. Please run install_dependencies.py manually.")
+                sys.exit(1)
+        except subprocess.CalledProcessError as e:
+            print("Error running dependency installer:", str(e))
+            sys.exit(1)
+        except Exception as e:
+            print("Unexpected error:", str(e))
+            sys.exit(1)
+
+# Check dependencies before initializing pygame
+check_dependencies()
+
 # Initialize Pygame
 pygame.init()
 
@@ -17,8 +52,8 @@ pygame.init()
 WIDTH, HEIGHT = 1024, 768
 BUTTON_WIDTH, BUTTON_HEIGHT = 250, 60
 
-# Window states
-WINDOWED_SIZE = (WIDTH, HEIGHT)
+# Window states - add extra height for title bar
+WINDOWED_SIZE = (WIDTH + 16, HEIGHT + 39)  # Add padding for window borders and title bar
 is_fullscreen = False
 
 # Colors
@@ -402,18 +437,50 @@ async def main():
 
     global is_fullscreen
     flags = pygame.RESIZABLE | pygame.DOUBLEBUF
-    screen = pygame.display.set_mode((WIDTH, HEIGHT), flags)
+    screen = pygame.display.set_mode(WINDOWED_SIZE, flags)
     pygame.display.set_caption("CodeBreak Game Launcher")
     clock = pygame.time.Clock()
+    current_width = WIDTH
+    current_height = HEIGHT
+
+    def update_ui_positions():
+        nonlocal current_width, current_height, game_list, single_player_btn, create_game_btn, join_game_btn, refresh_btn
+        # Update game list position and size
+        game_list.rect.x = current_width // 2 - 300
+        game_list.rect.y = 150
+        game_list.rect.width = min(600, current_width - 100)
+        game_list.rect.height = min(400, current_height - 300)
+
+        # Update button positions
+        center_x = current_width // 2
+        button_y = current_height - 150  # Position from bottom
+        spacing = BUTTON_WIDTH + 30
+
+        # Update button positions
+        single_player_btn.rect.x = center_x - spacing
+        single_player_btn.rect.y = button_y
+        create_game_btn.rect.x = center_x
+        create_game_btn.rect.y = button_y
+        join_game_btn.rect.x = center_x + spacing
+        join_game_btn.rect.y = button_y
+        refresh_btn.rect.x = center_x - 60
+        refresh_btn.rect.y = button_y + BUTTON_HEIGHT + 30
 
      # Function to toggle fullscreen
     def toggle_fullscreen():
         global is_fullscreen
         is_fullscreen = not is_fullscreen
         if is_fullscreen:
-            return pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+            screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN | pygame.DOUBLEBUF)
+            nonlocal current_width, current_height
+            current_width, current_height = screen.get_size()
+            update_ui_positions()
+            return screen
         else:
-            return pygame.display.set_mode(WINDOWED_SIZE, flags)
+            screen = pygame.display.set_mode(WINDOWED_SIZE, flags)
+            current_width, current_height = WINDOWED_SIZE
+            update_ui_positions()
+            return screen
 
     # Check if player is logged in via client_config.json
     if not is_logged_in():
@@ -546,6 +613,8 @@ async def main():
             
             elif event.type == pygame.VIDEORESIZE and not is_fullscreen:
                 screen = pygame.display.set_mode((event.w, event.h), flags)
+                current_width, current_height = event.w, event.h
+                update_ui_positions()
             
             # Handle button events
             button_result = None
