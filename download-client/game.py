@@ -796,6 +796,12 @@ class Game:
             Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
         ]
         
+        # Create leaderboard back button with proper callback
+        self.leaderboard_back_button = Button(
+            WIDTH // 2 - 75, HEIGHT - 80, 150, 40, "BACK",
+            lambda: self.transition_to(self.previous_state if self.previous_state in ["menu", "game_over"] else "menu")
+        )
+        
         # Create settings controls
         self.settings_controls = []
         
@@ -871,6 +877,15 @@ class Game:
                 button.rect.y = int(positions[i] * scale_y)
                 button.rect.width = button_width
                 button.rect.height = button_height
+                
+        # Update leaderboard back button
+        if hasattr(self, 'leaderboard_back_button'):
+            back_button_width = int(150 * scale_x)
+            back_button_height = int(40 * scale_y)
+            self.leaderboard_back_button.rect.x = self.current_width // 2 - back_button_width // 2
+            self.leaderboard_back_button.rect.y = int((HEIGHT - 80) * scale_y)
+            self.leaderboard_back_button.rect.width = back_button_width
+            self.leaderboard_back_button.rect.height = back_button_height
 
     async def handle_gameplay_state(self, events=None, dt=1/60):
         """Handle gameplay state."""
@@ -1469,50 +1484,7 @@ class Game:
         
         return resource
     
-    # def spawn_resource_at(self, x, y):
-    #     """Spawn a resource at the given location."""
-    #     # Determine resource type with rarity
-    #     resource_types = ["code_fragments", "energy_cores", "data_shards"]
-    #     weights = [70, 25, 5]  # Higher values = more common
-        
-    #     resource_type = random.choices(resource_types, weights=weights, k=1)[0]
-        
-    #     # Determine resource value
-    #     value = 1 if resource_type == "code_fragments" else 2 if resource_type == "energy_cores" else 5
-        
-    #     # Create resource
-    #     resource = {
-    #         "type": resource_type,
-    #         "x": x,
-    #         "y": y,
-    #         "collected": False,
-    #         "pulse": 0,
-    #         "pulse_dir": 1,
-    #         "value": value
-    #     }
-        
-    #     # Add to resources list
-    #     self.resources.append(resource)
-        
-    #     # Record in database if authenticated
-    #     if self.auth_token and self.username:
-    #         try:
-    #             headers = {"Authorization": f"Bearer {self.auth_token}"}
-    #             data = {
-    #                 "type": resource_type,
-    #                 "name": resource_type,
-    #                 "x": int(x),
-    #                 "y": int(y),
-    #                 "value": value
-    #             }
-                
-    #             # Send data to server asynchronously later
-    #             asyncio.create_task(self.record_spawn_in_database(data, headers))
-    #         except Exception as e:
-    #             print(f"Error recording resource spawn: {e}")
-        
-    #     return resource
-
+   
 
     
     async def send_websocket_message(self, message):
@@ -2788,7 +2760,7 @@ class Game:
             alpha = min(255, int(255 * (self.transition_timer / self.transition_duration)))
             
             # Draw fade overlay
-            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            overlay = pygame.Surface((self.current_width, self.current_height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, alpha))
             self.screen.blit(overlay, (0, 0))
             
@@ -2802,6 +2774,8 @@ class Game:
                 # Initialize new state if needed
                 if self.current_state == "gameplay" and not self.player:
                     await self.initialize_game_world()
+                elif self.current_state == "leaderboard":
+                    self.fetch_leaderboard()  # Fetch fresh leaderboard data
                 
         elif self.fading_in:
             # Increment transition timer
@@ -2811,7 +2785,7 @@ class Game:
             alpha = max(0, int(255 * (1 - self.transition_timer / self.transition_duration)))
             
             # Draw fade overlay
-            overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+            overlay = pygame.Surface((self.current_width, self.current_height), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, alpha))
             self.screen.blit(overlay, (0, 0))
             
@@ -2822,11 +2796,13 @@ class Game:
 
     def transition_to(self, state):
         """Transition to a new game state with proper cleanup."""
+        print(f"Transitioning from {self.current_state} to {state}")  # Debug print
+        
         if state == self.current_state:
             return
         
         # Special handling when leaving game over screen
-        if self.current_state == "game_over" and state == "menu":
+        if self.current_state == "game_over":
             # Clean up any lingering game over resources
             if hasattr(self, 'game_over_triggered'):
                 del self.game_over_triggered
@@ -2838,22 +2814,35 @@ class Game:
                 pygame.time.set_timer(self.game_over_event_id, 0)
             
             # Clear gameplay elements that might still be around
-            self.enemies = []
-            self.resources = []
-            self.power_ups = []
-            self.effects_list = []
+            if state != "leaderboard":  # Don't clear if going to leaderboard
+                self.enemies = []
+                self.resources = []
+                self.power_ups = []
+                self.effects_list = []
+        
+        # Special handling for leaderboard transition
+        if state == "leaderboard":
+            # Force a leaderboard refresh
+            self.leaderboard_last_update = 0
+            self.fetch_leaderboard()
+            
+            # Store the previous state for proper back button handling
+            if self.current_state in ["menu", "game_over", "pause"]:
+                self.previous_state = self.current_state
         
         # Store current and next states
         self.next_state = state
-        self.previous_state = self.current_state
+        if not (self.current_state == "game_over" and state == "leaderboard"):
+            self.previous_state = self.current_state
         
         # Prepare transition effect
         self.fading_out = True
+        self.fading_in = False  # Reset fading_in flag
         self.transition_timer = 0
         
         # Play transition sound if not muted
         if self.settings.get("sound_volume", 0.5) > 0:
-            self.effects.play_sound("menu_select")
+            self.play_sound("menu_select")
 
 
     def update_setting(self, setting, value):
@@ -3406,18 +3395,16 @@ class Game:
         # Use final_score instead of score if available
         display_score = getattr(self, 'final_score', self.score)
         
-        # Draw score with shadow effect for better readability
-        score_text = self.font_lg.render(f"SCORE: {display_score}", True, WHITE)
-        score_shadow = self.font_lg.render(f"SCORE: {display_score}", True, (30, 30, 30))
-        score_shadow_pos = (WIDTH // 2 - score_shadow.get_width() // 2 + 2, 222)
-        score_pos = (WIDTH // 2 - score_text.get_width() // 2, 220)
+        # Draw score with shadow effect
+        score_text = self.font_lg.render(f"FINAL SCORE: {display_score}", True, WHITE)
+        score_shadow = self.font_lg.render(f"FINAL SCORE: {display_score}", True, (30, 30, 30))
+        score_shadow_pos = (WIDTH // 2 - score_shadow.get_width() // 2 + 2, 212)
+        score_pos = (WIDTH // 2 - score_text.get_width() // 2, 210)
         self.screen.blit(score_shadow, score_shadow_pos)
         self.screen.blit(score_text, score_pos)
         
-        # Use final_time instead of survival_time if available
-        display_time = getattr(self, 'final_time', self.survival_time)
-        
         # Draw survival time with shadow effect
+        display_time = getattr(self, 'final_time', time.time() - self.game_start_time)
         minutes = int(display_time // 60)
         seconds = int(display_time % 60)
         time_text = self.font_lg.render(f"SURVIVAL TIME: {minutes:02d}:{seconds:02d}", True, WHITE)
@@ -3426,19 +3413,6 @@ class Game:
         time_pos = (WIDTH // 2 - time_text.get_width() // 2, 260)
         self.screen.blit(time_shadow, time_shadow_pos)
         self.screen.blit(time_text, time_pos)
-        
-        # Ensure game over buttons exist and are properly initialized
-        if not hasattr(self, 'game_over_buttons') or not self.game_over_buttons:
-            button_width = 200
-            button_height = 50
-            button_x = WIDTH // 2 - button_width // 2
-            self.game_over_buttons = [
-                Button(button_x, 350, button_width, button_height, "PLAY AGAIN", lambda: asyncio.create_task(self.restart_game())),
-                Button(button_x, 420, button_width, button_height, "LEADERBOARD", lambda: self.transition_to("leaderboard")),
-                Button(button_x, 490, button_width, button_height, "QUIT TO MENU", lambda: self.transition_to("menu"))
-            ]
-            # Store the game over state as previous state for proper back button functionality
-            self.previous_state = "game_over"
         
         # Draw instructions to ensure players know how to proceed
         instruction_text = self.font_sm.render("Click a button or press ESC to return to menu", True, WHITE)
@@ -3451,64 +3425,22 @@ class Game:
             button.update(mouse_pos)
             button.draw(self.screen, self.font_md)
         
-        # Handle button clicks and keyboard events
+        # Handle events
         for event in events:
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                for button in self.game_over_buttons:
-                    if button.handle_event(event):
-                        self.play_sound("menu_select")  # Add sound feedback
-                        return  # Ensure the button action is executed
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 self.play_sound("menu_select")
                 self.transition_to("menu")
-        
-        # If this is the first time processing game over, send score to server
-        if not hasattr(self, 'score_submitted') or not self.score_submitted:
-            # Make sure we have valid authentication
-            if hasattr(self, 'auth_token') and self.auth_token:
-                # Submit the score using auth token
-                headers = {"Authorization": f"Bearer {self.auth_token}"}
-                try:
-                    data = {
-                        "score": display_score,
-                        "wave_reached": getattr(self, 'final_wave', self.wave_number),
-                        "survival_time": int(display_time)
-                    }
-                    print(f"Submitting final score: {data}")
-                    print(f"Using server URL: {self.server_url}")
-                    print(f"Auth token: {self.auth_token[:10]}...")
-                    
-                    # Fix the endpoint - remove trailing slash
-                    response = requests.post(
-                        f"{self.server_url}/leaderboard", 
-                        json=data, 
-                        headers=headers,
-                        timeout=5
-                    )
-                    
-                    if response.status_code == 200:
-                        print("Score submitted successfully")
-                        self.add_effect("text", WIDTH // 2, 300, 
-                                text="Score submitted to leaderboard!", 
-                                color=GREEN, 
-                                size=20, 
-                                duration=3.0)
-                    else:
-                        print(f"Failed to submit score: {response.status_code} - {response.text}")
-                        self.add_effect("text", WIDTH // 2, 300, 
-                                text="Failed to submit score to leaderboard", 
-                                color=RED, 
-                                size=20, 
-                                duration=3.0)
-                except Exception as e:
-                    print(f"Error submitting score: {e}")
-                    self.add_effect("text", WIDTH // 2, 300, 
-                            text="Error connecting to leaderboard server", 
-                            color=RED, 
-                            size=20, 
-                            duration=3.0)
-
-            self.score_submitted = True
+                return
+            
+            # Handle button events
+            for button in self.game_over_buttons:
+                if event.type == pygame.MOUSEBUTTONDOWN and button.handle_event(event):
+                    self.play_sound("menu_select")
+                    print(f"Game over button clicked: {button.text}")  # Debug print
+                    return
 
     def handle_player_defeat(self):
         """Handle player defeat - submit score and show game over screen"""
@@ -3661,13 +3593,13 @@ class Game:
         self.draw_leaderboard_entries()
         
         # Determine the return state based on where we came from
-        return_state = self.previous_state if self.previous_state in ["menu", "game_over"] else "menu"
+        return_state = self.previous_state if self.previous_state in ["menu", "game_over", "pause"] else "menu"
+        print(f"Return state will be: {return_state}")  # Debug print
         
-        # Create and draw back button
-        back_button = Button(WIDTH // 2 - 75, HEIGHT - 80, 150, 40, "BACK", lambda: self.transition_to(return_state))
+        # Update and draw back button
         mouse_pos = pygame.mouse.get_pos()
-        back_button.update(mouse_pos)
-        back_button.draw(self.screen, self.font_md)
+        self.leaderboard_back_button.update(mouse_pos)
+        self.leaderboard_back_button.draw(self.screen, self.font_md)
         
         # Draw instructions
         instructions = self.font_sm.render("Press ESC to return", True, (200, 200, 255))
@@ -3675,14 +3607,19 @@ class Game:
         
         # Handle events
         for event in events:
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    self.transition_to(return_state)
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                # Handle back button click
-                if back_button.handle_event(event):
-                    self.play_sound("menu_select")
-                    self.transition_to(return_state)
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                self.play_sound("menu_select")
+                self.transition_to(return_state)
+                return
+            # Handle button events
+            if event.type == pygame.MOUSEBUTTONDOWN and self.leaderboard_back_button.handle_event(event):
+                self.play_sound("menu_select")
+                print(f"Back button clicked, returning to {return_state}")  # Debug print
+                self.transition_to(return_state)
+                return
 
     def draw_leaderboard_background(self,dt):
         """Draw animated cyberpunk background for leaderboard."""
@@ -3893,10 +3830,6 @@ class Game:
             print(f"Error recording item collection: {e}")
             return False
            
-
-    
-            
-
 
     def handle_shared_resource(self, data):
         """Process shared resource from another player."""
@@ -4209,9 +4142,6 @@ class Game:
                     )
 
 
-
-
-    
     def update(self):
         """Update chat system state"""
         # Update cursor blinking
@@ -4314,3 +4244,8 @@ class Game:
                         duration=0.5,
                         velocity=(math.cos(angle) * speed, math.sin(angle) * speed)
                     )
+
+    def show_leaderboard(self):
+        """Transition to leaderboard state"""
+        print("Transitioning to leaderboard...")
+        self.transition_to("leaderboard")
