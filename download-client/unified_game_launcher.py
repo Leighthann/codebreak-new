@@ -12,17 +12,16 @@ from pathlib import Path
 
 def check_dependencies():
     """Check if all required dependencies are installed"""
-    required_packages = ["pygame", "websockets", "requests", "python-dotenv", "pyperclip"]
-    missing_packages = []
-    
-    for package in required_packages:
-        try:
-            __import__(package)
-        except ImportError:
-            missing_packages.append(package)
-    
-    if missing_packages:
-        print("Missing required packages:", ", ".join(missing_packages))
+    try:
+        # Try importing each required package
+        import pygame
+        import websockets
+        import requests
+        import dotenv
+        import pyperclip
+        return True
+    except ImportError as e:
+        print(f"Missing dependency: {str(e)}")
         print("Running dependency installer...")
         
         # Run install_dependencies.py
@@ -30,8 +29,7 @@ def check_dependencies():
             result = subprocess.run([sys.executable, "install_dependencies.py"], check=True)
             if result.returncode == 0:
                 print("Dependencies installed successfully!")
-                # Re-import pygame since we need it for the launcher
-                import pygame
+                return True
             else:
                 print("Failed to install dependencies. Please run install_dependencies.py manually.")
                 sys.exit(1)
@@ -43,7 +41,8 @@ def check_dependencies():
             sys.exit(1)
 
 # Check dependencies before initializing pygame
-check_dependencies()
+if not check_dependencies():
+    sys.exit(1)
 
 # Initialize Pygame
 pygame.init()

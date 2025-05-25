@@ -964,10 +964,7 @@ class Game:
                 # Always await the move method since it's an async method
                 moving = await self.player.move(keys, self.world_generator)
                 self.player.is_moving = moving
-                
-                # Debug print to see if movement is being detected
-                if moving:
-                    print(f"Player moved to: {self.player.x}, {self.player.y}")
+        
             except Exception as e:
                 print(f"Error in player movement: {e}")
             
@@ -1201,8 +1198,6 @@ class Game:
                 # Update the enemy directly with await
                 try:
                     await enemy.update(self.player)
-                    # Print state for debugging
-                    print(f"Enemy updated: {enemy.state}, position: ({enemy.x}, {enemy.y})")
                 except Exception as e:
                     print(f"Error updating enemy: {e}")
                 
@@ -1271,7 +1266,6 @@ class Game:
         difficulty_factor = difficulty_mult.get(self.settings["difficulty"], 1.0)
         
         self.enemies_to_spawn = max(3, int(base_enemies * difficulty_factor))
-        print(f"Spawning {self.enemies_to_spawn} enemies")  # Debug print
         self.spawn_timer = 0
         
         # Show wave notification
@@ -1292,7 +1286,6 @@ class Game:
         for _ in range(initial_spawn):
             self.spawn_wave_enemy()
         
-        print(f"Initial spawn complete. {self.enemies_to_spawn} enemies remaining")  # Debug print
 
     def spawn_wave_enemy(self):
         """Spawn a new enemy for the current wave."""
@@ -1337,7 +1330,6 @@ class Game:
         
         self.enemies.append(enemy)
         self.enemies_to_spawn -= 1
-        print(f"Spawned enemy at ({x}, {y}). {self.enemies_to_spawn} remaining")  # Debug print
 
     def spawn_resources(self, count):
         """Spawn resources in the world."""
@@ -3536,9 +3528,6 @@ class Game:
         # Update survival time
         if self.current_state == "gameplay" and not self.show_crafting:
             self.survival_time += dt
-            # Debug output to verify time is incrementing
-            if int(self.survival_time) % 10 == 0 and self.survival_time > 0:
-                print(f"Survival time: {int(self.survival_time)} seconds, Current score: {self.score}, Wave: {self.wave_number}")
 
         # Update player invincibility frames
         if self.player and hasattr(self.player, 'is_invincible'):

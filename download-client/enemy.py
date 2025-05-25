@@ -100,8 +100,6 @@ class Enemy:
          # Calculate distance to player
         distance = ((self.x - player.x) ** 2 + (self.y - player.y) ** 2) ** 0.5
 
-        # Debug print - uncomment if needed to troubleshoot
-        print(f"Enemy state: {self.state}, distance: {distance}, chase range: {self.chase_range}, player position: ({player.x}, {player.y}), enemy position: ({self.x}, {self.y})")
 
         # Update state based on distance
         if distance < self.attack_range:
@@ -114,29 +112,6 @@ class Enemy:
         else:
             self.state = "idle"
 
-        # Update animation only if sprite exists
-        '''
-        if self.sprite:
-            self.frame_counter += 1
-            if self.frame_counter >= self.animation_speed:
-                self.frame_counter = 0
-                self.frame_index = (self.frame_index + 1) % 4
-
-            # Set sprite based on state and direction
-            if self.state == "attack" and self.attack_frames:
-                self.sprite = self.attack_frames[self.frame_index % len(self.attack_frames)]
-            elif self.state == "chase":
-                if self.direction == "right" and self.walk_right:
-                    self.sprite = self.walk_right[self.frame_index % len(self.walk_right)]
-                elif self.direction == "left" and self.walk_left:
-                    self.sprite = self.walk_left[self.frame_index % len(self.walk_left)]
-                elif self.direction == "up" and self.walk_up:
-                    self.sprite = self.walk_up[self.frame_index % len(self.walk_up)]
-                elif self.direction == "down" and self.walk_down:
-                    self.sprite = self.walk_down[self.frame_index % len(self.walk_down)]
-            elif self.idle_frames:
-                self.sprite = self.idle_frames[self.frame_index % len(self.idle_frames)]
-            '''
 
     def chase_player(self, player):
         dx = player.x - self.x
@@ -147,25 +122,10 @@ class Enemy:
         dx = dx / distance * self.speed
         dy = dy / distance * self.speed
         
-        # Debug print to confirm speed and movement
-        print(f"Chasing player: speed={self.speed}, moving by dx={dx}, dy={dy}")
         
         self.x += dx
         self.y += dy
         
-        '''
-        # Update direction for animation
-        if abs(dx) > abs(dy):
-            if dx > 0:
-                self.direction = "right"
-            else:
-                self.direction = "left"
-        else:
-            if dy > 0:
-                self.direction = "down"
-            else:
-                self.direction = "up"
-        '''
                 
         # Don't wait for server sync - create task and continue
         try:
